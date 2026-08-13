@@ -277,7 +277,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		clearTexture(this.gl, this.selectionMaskTex);
 		const maskWidth = right - left;
 		const maskHeight = bottom - top;
-		const maskCanvas = document.createElement('canvas');
+		const maskCanvas = createEl('canvas');
 		maskCanvas.width = maskWidth;
 		maskCanvas.height = maskHeight;
 		const ctx = maskCanvas.getContext('2d');

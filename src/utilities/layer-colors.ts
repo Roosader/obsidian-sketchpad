@@ -17,7 +17,7 @@ export async function sampleDataUrlColor(dataUrl: string): Promise<string | unde
 		const image = new Image();
 		image.src = dataUrl;
 		await image.decode();
-		const canvas = document.createElement('canvas');
+		const canvas = createEl('canvas');
 		canvas.width = 1;
 		canvas.height = 1;
 		const context = canvas.getContext('2d');

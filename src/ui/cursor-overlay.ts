@@ -23,7 +23,7 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 }
 
 async function renderBitmap(url: string): Promise<HTMLCanvasElement> {
-	const bitmap = document.createElement('canvas');
+	const bitmap = createEl('canvas');
 	try {
 		const image = await loadImage(url);
 		bitmap.width = image.naturalWidth;

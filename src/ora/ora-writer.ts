@@ -37,7 +37,7 @@ function buildStackXml(document: OraDocument): string {
 }
 
 function createBlankLayerCanvas(document: OraDocument, layer: OraLayer): HTMLCanvasElement {
-	const canvas = window.document.createElement('canvas');
+	const canvas = window.createEl('canvas');
 	canvas.width = document.width;
 	canvas.height = document.height;
 	const context = canvas.getContext('2d');
@@ -49,7 +49,7 @@ function createBlankLayerCanvas(document: OraDocument, layer: OraLayer): HTMLCan
 }
 
 function renderMergedCanvas(document: OraDocument, layerCanvases: HTMLCanvasElement[]): HTMLCanvasElement {
-	const canvas = window.document.createElement('canvas');
+	const canvas = window.createEl('canvas');
 	canvas.width = document.width;
 	canvas.height = document.height;
 	const context = canvas.getContext('2d');
@@ -73,7 +73,7 @@ function renderMergedCanvas(document: OraDocument, layerCanvases: HTMLCanvasElem
 
 function renderThumbnailDataUrl(sourceCanvas: HTMLCanvasElement): string {
 	const scale = Math.min(1, THUMBNAIL_MAX_DIMENSION / Math.max(sourceCanvas.width, sourceCanvas.height));
-	const canvas = window.document.createElement('canvas');
+	const canvas = window.createEl('canvas');
 	canvas.width = Math.max(1, Math.round(sourceCanvas.width * scale));
 	canvas.height = Math.max(1, Math.round(sourceCanvas.height * scale));
 	const context = canvas.getContext('2d');

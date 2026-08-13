@@ -77,7 +77,7 @@ export async function loadImageIntoTexture(gl: WebGL2RenderingContext, texture: 
 	const image = new Image();
 	image.src = dataUrl;
 	await image.decode();
-	const canvas = document.createElement('canvas');
+	const canvas = createEl('canvas');
 	canvas.width = width;
 	canvas.height = height;
 	const context = canvas.getContext('2d');
@@ -105,7 +105,7 @@ export async function readTextureToCanvas(gl: WebGL2RenderingContext, texture: G
 	gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
 	gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
-	const canvas = document.createElement('canvas');
+	const canvas = createEl('canvas');
 	canvas.width = width;
 	canvas.height = height;
 	const context = canvas.getContext('2d');

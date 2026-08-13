@@ -36,25 +36,6 @@ export default defineConfig(
 	},
 	...obsidianmd.configs.recommended,
 	{
-		// These files create DETACHED elements (offscreen canvases, a detached tree
-		// root) that must never be attached to the DOM. Obsidian's createEl/createDiv
-		// helpers append to the node they are called on, so using them here would throw
-		// at runtime. document.createElement is required, and prefer-create-el has no
-		// option to allow detached element creation.
-		files: [
-			'src/rendering/gpu-context.ts',
-			'src/rendering/gpu-texture-layer.ts',
-			'src/technical/gpu-stroke-engine.ts',
-			'src/ui/cursor-overlay.ts',
-			'src/ui/folder-tree-browser.ts',
-			'src/utilities/layer-colors.ts',
-			'src/ora/ora-writer.ts',
-		],
-		rules: {
-			'obsidianmd/prefer-create-el': 'off',
-		},
-	},
-	{
 		// Settings tab renders imperatively via display() and custom controls;
 		// migrating to the declarative getSettingDefinitions() API is tracked separately.
 		files: ['src/utilities/settings.ts'],

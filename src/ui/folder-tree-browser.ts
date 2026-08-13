@@ -20,7 +20,7 @@ export class FolderTreeBrowser {
 		// vault root (path '/') is always expanded and can't be collapsed
 		this.rootPath = app.vault.getRoot().path;
 		this.expandedPaths = new Set([this.rootPath]);
-		this.treeEl = document.createElement('div');
+		this.treeEl = createDiv();
 		this.treeEl.addClass('sketchpad-folder-tree');
 		this.preselectDefaultFolder(options?.defaultFolder?.trim() ?? '');
 		this.renderFolderTree();

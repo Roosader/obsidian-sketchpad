@@ -10,7 +10,7 @@ export function isGpuSupported(): boolean {
 	if (typeof document === 'undefined') {
 		return false;
 	}
-	const canvas = document.createElement('canvas');
+	const canvas = createEl('canvas');
 	const gl = canvas.getContext('webgl2');
 	if (!gl) {
 		return false;
@@ -32,7 +32,7 @@ async function requestGpuContext(): Promise<GpuContext | null> {
 		return null;
 	}
 	try {
-		const canvas = document.createElement('canvas');
+		const canvas = createEl('canvas');
 		const gl = canvas.getContext('webgl2');
 		if (!gl) {
 			return null;
