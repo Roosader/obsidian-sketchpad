@@ -85,8 +85,8 @@ The layers can be reordered except for the Paper layer which always remains at t
 | Zoom out                 | Mouse Wheel Down |
 | Rotate counter-clockwise | A                |
 | Rotate clockwise         | S                |
-| Undo                     | Ctrl + Z         |
-| Redo                     | Ctrl + Shift + Z |
+| Undo                     |                  |
+| Redo                     |                  |
 | New sketch file          |                  |
 | Open sketch file         |                  |
 | Save sketch file         |                  |
