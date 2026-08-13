@@ -1,0 +1,985 @@
+.workspace-leaf-content .view-content.sketchpad-modal {
+	overflow: hidden; /* remove if there is a problem */
+	padding: 0;
+}
+.sketchpad-modal {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	position: relative;
+}
+.sketchpad-header {
+	border-bottom: 1px solid var(--background-modifier-border);
+	overflow-x: auto;
+}
+
+.is-focused .workspace-leaf-content .view-header-title.sketchpad-header-title {
+	color: var(--text-muted);
+ }
+
+button.sketchpad-header-button{
+	align-self: center;
+	border: 1px solid var(--text-faint);
+	cursor: pointer;
+	font-size: 0.8em;
+	height: 24px;
+	color: var(--text-muted);
+}
+
+/* Canvas styles */
+.sketchpad-shell {
+	position: relative; /* containing block for the floating minimal sidebars */
+	display: flex;
+	flex: 1;
+	min-height: 0;
+	height: 100%; 
+}
+
+.sketchpad-canvas-panel {
+	position: relative;
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	background: var(--background-secondary-alt);
+	touch-action: none;
+}
+.sketchpad-canvas-stack {
+	position: absolute;
+	transform-origin: center center;
+}
+
+.sketchpad-canvas {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	touch-action: none;
+	background: white;
+	image-rendering: pixelated;
+}
+.sketchpad-canvas-hidden {
+	display: none;
+}
+.sketchpad-hidden {
+	display: none;
+}
+
+/* Top Toolbar styles */
+.sketchpad-toolbar{
+	position: absolute;
+	top: 5px;
+	left: 50%;
+	transform: translateX(-50%);
+	justify-content: center;
+	display: flex;
+	flex-wrap: wrap;
+	width: min(500px, 40%);
+
+	column-gap: 15px;
+	row-gap: 10px;
+
+	z-index: 7;
+	pointer-events: none; /* disable pointer events for the toolbar*/
+}
+.sketchpad-toolbar-marking-section,
+.sketchpad-toolbar-viewing-section {
+	display: flex;
+	gap: 8px;
+}
+
+/* Tool button styles */
+button.sketchpad-tool {
+	align-self: center;
+	padding: 2px 4px;
+	cursor: pointer;
+	background-color: var(--background-primary);
+	pointer-events: auto; /* enable pointer events for the tool buttons */
+}
+.sketchpad-tool svg {
+	width: 22px;
+	height: 22px;
+}
+.sketchpad-tool.active {
+	background-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+.sketchpad-tool:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+.sketchpad-tool:hover {
+	background-color: var(--interactive-accent-hover);
+	color: var(--text-on-accent);
+}
+
+.sketchpad-tool-setting-value {
+	min-width: 2.8em;
+	text-align: right;
+	color: var(--text-muted);
+	font-size: 0.8em;
+}
+
+/* Tool cursors */
+.sketchpad-pencil-active,
+.sketchpad-pen-active,
+.sketchpad-brush-active,
+.sketchpad-eraser-active {
+	cursor: none;
+}
+.sketchpad-eyedropper-active
+{
+	cursor: url('data:image/x-icon;base64,AAACAAEAICACAAEADgAwAQAAFgAAACgAAAAgAAAAQAAAAAEAAQAAAAAAgAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAA////AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB4AAAAhAAAALIAAAC5AAAAnIAAAE5AAAAnLAAAE5IAAAnCAAAExAAAAgQAAAECAAACAQAAAmEAAAGRAAAADgAA/////////////////////////////////////////////////////////////////////////////////////4f///8D////Af///wD///8Af///gD///8AT///gAf//8AH///gD///8A////gH///wA///8AP///mD////x//8='), auto;
+}
+.sketchpad-lasso-active {
+	cursor: url('data:image/x-icon;base64,AAACAAEAICACAAEADgAwAQAAFgAAACgAAAAgAAAAQAAAAAEAAQAAAAAAgAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAA////AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB/4AAACBgAAGHEAAAhMgAATQkAAI0FAAChBQAAvwUAAKAFAACgBQAAoAUAAJAJAABIEgAAJ+QAABAIAAAP8AAA/////////////////////////////////////////////////////////////////////////////////////4Af//+AB///gAP//8DB//+A8P//APj//wD4//8A+P//H/j//x/4//8f+P//D/D//4fh///AA///4Af///AP//8='), auto;
+}
+.sketchpad-hand-active {
+	cursor: grab;
+}
+.sketchpad-hand-active:active {
+	cursor: grabbing;
+}
+.sketchpad-zoom-in-active {
+	cursor: zoom-in;
+}
+.sketchpad-zoom-out-active {
+	cursor: zoom-out;
+}
+.sketchpad-rotate-active {
+	cursor: url('data:image/x-icon;base64,AAACAAEAICACAAEACwAwAQAAFgAAACgAAAAgAAAAQAAAAAEAAQAAAAAAgAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAA////AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAgAAoAUAAJAJAACIEQAAhCEAAIgRAACIEQAApmUAAFGKAAAMMAAAA8AAAAAAAAAAAAAA/////////////////////////////////////////////////////////////////////////////////////////////////////7/9//8f+P//D/D//wfg//8DwP//B+D//wfg//8BgP//oAX///AP///8P/////////////8='), auto;
+}
+
+/* Marking-tool cursor */
+/* contains the marking-tool cursor and tip-size preview */
+.sketchpad-cursor-overlay {
+	position: absolute;
+	left: 0;
+	top: 0;
+	pointer-events: none;
+	z-index: 5;
+	will-change: transform;
+}
+/* Selection gizmo overlay*/
+.sketchpad-selection-overlay {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	pointer-events: none;
+	z-index: 4;
+}
+
+/* Grid overlay */
+.sketchpad-grid-overlay {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	pointer-events: none;
+	image-rendering: crisp-edges;
+}
+.sketchpad-grid-overlay-hidden {
+	display: none;
+}
+
+/* Simple color Picker */
+input[type='color'].sketchpad-color-picker {
+    appearance: none;
+    -webkit-appearance: none;
+
+    width: 34px;
+    height: 34px;
+
+    padding: 0;
+    border: 2px solid var(--background-modifier-border);
+    border-radius: 4px;
+
+    background: none;
+    cursor: pointer;
+}
+input[type='color'].sketchpad-color-picker::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+input[type='color'].sketchpad-color-picker::-webkit-color-swatch {
+	border-radius: 0;
+	height: 30px;
+}
+
+/* Horizontal range slider styles */
+input[type='range'].sketchpad-horizontal-slider {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	width: 100%;
+	--percent: 50%;
+}
+
+input[type='range'].sketchpad-horizontal-slider::-webkit-slider-runnable-track {
+	background: linear-gradient(
+		to right,
+		var(--interactive-accent) 0 var(--percent),
+		var(--background-modifier-border) var(--percent) 100%
+	);
+	border-radius: 1px;
+	height: 10px;
+}
+
+input[type='range'].sketchpad-horizontal-slider::-webkit-slider-thumb {
+	appearance: none;
+    -webkit-appearance: none;
+	border-radius: 20%;
+	margin-top: 3px;
+	background: color-mix(in srgb, var(--interactive-accent) 50%, var(--text-normal) 50%);
+}
+
+/* Vertical range slider styles */
+input[type='range'].sketchpad-vertical-slider {
+	writing-mode: vertical-lr;
+	direction: rtl;
+	align-self: center;
+	height: 100%;
+	width: 20px;
+}
+
+input[type='range'].sketchpad-vertical-slider::-webkit-slider-thumb {
+	appearance: none;
+    -webkit-appearance: none;
+	border-radius: 20%;
+	width: 30px;
+	height: 30px;
+	top: 0;
+	background-color: var(--text-muted);
+}
+
+/* Dropdown styles */
+.sketchpad-dropdown {
+	color: var(--text-muted);
+	font-size: 0.8em;
+	text-align: center;
+	text-align-last: center;
+	height: 25px;
+	margin-left: auto;
+	min-width: 100px;
+	padding: 0;
+}
+.sketchpad-dropdown option {
+	text-align: center;
+}
+
+/*expand collapse button styles*/
+button.sketchpad-pressure-reset-button,
+button.sketchpad-view-reset-button,
+button.sketchpad-panel-move-button,
+button.sketchpad-expand-collapse-button {
+	padding: 0;
+	background-color:transparent;
+	box-shadow: none;
+	touch-action: none;
+}
+button.sketchpad-expand-collapse-button.is-active{
+	color: var(--interactive-accent);
+}
+button.sketchpad-expand-collapse-button svg {
+	width: 20px;
+	height: 20px;
+}
+button.sketchpad-pressure-reset-button:hover,
+button.sketchpad-view-reset-button:hover,
+button.sketchpad-expand-collapse-button:hover {
+	box-shadow: none;
+	color: var(--text-success);
+}
+/*panel move button */
+button.sketchpad-panel-move-button {
+	cursor: grab;
+	color: var(--text-muted);
+}
+button.sketchpad-panel-move-button:active {
+	cursor: grabbing;
+	color: var(--text-success);
+}
+
+/* Left Sidebar styles */
+.sketchpad-left-sidebar {
+	background: var(--background-primary);
+	border-right: 1px solid var(--background-modifier-border);
+	overflow: hidden;
+	display: flex;
+	flex-direction: row;
+	flex-shrink: 0;
+	z-index: 8;
+	touch-action: none;
+}
+.sketchpad-left-sidebar *{
+	touch-action: none;
+}
+
+.sketchpad-layer-controls {
+	border-right: 1px solid var(--background-modifier-border);
+	flex-shrink: 0;
+	overflow-y: auto;
+	overflow-x: hidden;
+	width: 200px;
+}
+.sketchpad-layer-controls.sketchpad-collapsed {
+	display: none;
+}
+.sketchpad-tool-sidebar-title,
+.sketchpad-layer-controls-title {
+	text-align: center;
+	color: var(--text-muted);
+	font-size: 0.9em;
+	border-bottom: 1px solid var(--background-modifier-border);
+	padding: 5px;
+	background: var(--background-secondary);
+}
+.sketchpad-layer-card {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 5px 5px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+.sketchpad-layer-active {
+	background-color: var(--text-selection);
+}
+.sketchpad-layer-row {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 5px;
+	flex-wrap: nowrap;
+}
+.sketchpad-layer-row .sketchpad-dropdown {
+	min-width: 60px;
+	max-width: 70px;
+
+}
+.sketchpad-layer-row div {
+	min-width: 45px;
+}
+.sketchpad-grid-toggle-row,
+.sketchpad-layer-toggle-row {
+	color: var(--text-muted);
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 8px;
+	padding: 5px;
+	justify-content: space-between;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+.sketchpad-layer-toggle-row span,
+.sketchpad-grid-toggle-row span{
+	display: flex;
+	align-items: center;
+}
+button.sketchpad-layer-visibility-button,
+button.sketchpad-layer-move-button {
+	padding: 0;
+	background-color: transparent;
+	box-shadow: none;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+button.sketchpad-layer-move-button {
+	flex-shrink: 0;
+	width: 18px;
+	height: 18px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+button.sketchpad-layer-move-button:hover {
+	color: var(--interactive-accent);
+}
+button.sketchpad-layer-move-button:disabled {
+	opacity: 0.3;
+	cursor: default;
+}
+
+button.sketchpad-layer-hidden {
+	color: var(--background-modifier-error);
+}
+.sketchpad-layer-visibility-button:hover {
+	color: var(--text-success);
+}
+.sketchpad-canvas-controls {
+	width: 20px;
+}
+
+.sketchpad-layer-paper-color-label {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+}
+.sketchpad-layer-paper-color-label svg {
+	color: var(--text-muted);
+}
+
+input[type='color'].sketchpad-paper-color-picker {
+    appearance: none;
+    -webkit-appearance: none;
+
+    min-width: 100px;
+
+    padding: 0;
+    border-radius: 4px;
+	border: 1px solid var(--background-modifier-border);
+    background: none;
+    cursor: pointer;
+	margin-left: auto;
+}
+input[type='color'].sketchpad-paper-color-picker::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+input[type='color'].sketchpad-paper-color-picker::-webkit-color-swatch {
+    border-radius: 0;
+}
+
+/* layer order controls */
+.sketchpad-default-layer-order {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 0 12px 8px 12px;
+}
+.sketchpad-default-layer-order-row {
+	background-color: var(--setting-items-background);
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 4px 8px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+}
+.sketchpad-default-layer-order-row span {
+	min-width: 60px;
+	width: 10%;
+	font-weight: var(--font-medium);
+}
+.sketchpad-default-layer-order-row button.sketchpad-layer-move-button {
+	width: 24px;
+	height: 24px;
+}
+
+/* View Controls styles */
+.sketchpad-vertical-toolbar,
+.sketchpad-view-controls{
+	overflow-x:hidden;
+	flex-shrink: 0;
+	display: flex;
+	flex-direction: column;
+	overflow-y: auto;
+	width: 50px;
+	gap: 5px;
+	align-items: center;
+	padding: 5px 0;
+	touch-action: none;
+}
+.sketchpad-vertical-toolbar-label,
+.sketchpad-view-controls-label {
+	text-align: center;
+	flex-shrink: 0;
+}
+.sketchpad-view-controls-button {
+	width: 80%;
+	height: 40px;
+	padding: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+.sketchpad-view-controls-button svg{
+	width: 30px;
+	height: 30px;
+	flex-shrink: 0;
+}
+
+body.is-mobile .sketchpad-view-controls-button {
+	padding: 0;
+}
+.sketchpad-view-controls-button.is-active {
+	background-color: var(--interactive-accent);
+}
+
+
+/* Right Sidebar styles */
+.sketchpad-right-sidebar
+{	
+	background: var(--background-primary);
+	border-left: 1px solid var(--background-modifier-border);
+	overflow: hidden;
+	display: flex;
+	flex-direction: row;
+	flex-shrink: 0;
+	z-index: 8;
+	touch-action: none;
+}
+.sketchpad-right-sidebar *{
+	touch-action: none;
+}
+/* Tool Settings styles */
+.sketchpad-tool-settings {
+	border-left: 1px solid var(--background-modifier-border);
+	width: 200px;
+	flex-shrink: 0;
+	overflow-y: auto;
+	overflow-x: hidden;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+.sketchpad-tool-settings.sketchpad-collapsed {
+	display: none;
+}
+
+.sketchpad-setting-row {
+	display: grid;
+	grid-template-columns: 1fr auto;
+	align-items: center;
+	gap:6px;
+	padding-left: 5px;
+	padding-right: 5px;
+}
+.sketchpad-setting-row > label {
+	text-wrap: nowrap;
+	font-size: 0.95em;
+}
+.sketchpad-setting-row > input[type='range'] {
+	grid-column: 1;
+	width: 100%;
+}
+
+.sketchpad-setting-row > .sketchpad-tool-setting-value {
+	grid-column: 2;
+}
+
+/* OKHSL Color Picker styles */
+.sketchpad-okhsl-color-picker { 
+	border-left: 1px solid var(--background-modifier-border);
+	width: 200px;
+	flex-shrink: 0;
+	overflow-y: auto;
+	overflow-x: hidden;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+.sketchpad-okhsl-color-picker.sketchpad-collapsed { 
+	display: none;
+}
+.sketchpad-okhsl-swatch {
+	height: 50px;
+	margin: 5px 8px 2px 8px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+	background-color: #000000;
+}
+.sketchpad-okhsl-sliders {
+	display: flex;
+	flex-direction: row;
+	justify-content: center;
+	gap: 8px;
+	padding: 2px 8px 8px 8px;
+	flex: 1;
+	min-height: 0;
+}
+.sketchpad-okhsl-slider-group {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 4px;
+	flex: 1;
+	min-width: 0;
+}
+.sketchpad-okhsl-slider-label {
+	font-size: 0.8em;
+	color: var(--text-muted);
+}
+.sketchpad-okhsl-value {
+	font-size: 0.7em;
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+input[type='range'].sketchpad-okhsl-slider {
+	-webkit-appearance: none;
+	appearance: none;
+	writing-mode: vertical-lr;
+	direction: rtl;
+	width: 30px;
+	height: 280px;
+	align-self: center;
+	margin: 0;
+	border-radius: var(--radius-s);
+	background: var(--okhsl-track-gradient, var(--background-modifier-border));
+}
+input[type='range'].sketchpad-okhsl-slider::-webkit-slider-runnable-track {
+	-webkit-appearance: none;
+	appearance: none;
+	background: transparent;
+}
+input[type='range'].sketchpad-okhsl-slider::-webkit-slider-thumb {
+	-webkit-appearance: none;
+	appearance: none;
+	top: 0;
+	border-radius: var(--radius-s);
+	width: 32px;
+	height: 22px;
+	background-color: var(--text-muted);
+	border: 1px solid var(--background-primary);
+}
+
+/* Pressure Curve styles */
+.sketchpad-pressure-curve {
+	aspect-ratio: 1 / 1;
+	width: 100%;
+	border: 2px solid var(--text-faint);
+	background: var(--background-secondary);
+	--curve-color: var(--text-faint);
+	--point-color: var(--color-accent);
+	--point-active-color: var(--text-warning);
+	--grid-color: color-mix(in srgb, var(--text-faint) 70%, transparent);
+	cursor: crosshair;
+	image-rendering: auto;
+	touch-action: none;
+}
+
+.sketchpad-pressure-readout {
+	font-size: 0.7em;
+	color: var(--text-muted);
+	white-space: nowrap;
+	align-self: center;
+	padding-bottom: 5px;
+}
+
+.sketchpad-pressure-section {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 0 5px;
+}
+
+.sketchpad-pressure-title {
+	display: grid;
+	grid-template-columns: 1fr auto auto;
+	align-items: center;
+	gap: 6px;
+}
+.sketchpad-pressure-title > label {
+	font-size: 0.95em;
+}
+
+/* Confirm Modal styles */
+.sketchpad-confirm-modal {
+	width: 350px;
+}
+.sketchpad-confirm-modal button {
+	min-width: 80px;
+	margin-left: 10px;
+}
+
+/* Folder tree browser */
+.sketchpad-folder-tree {
+	max-height: 220px;
+	overflow-y: auto;
+	border: 1px solid var(--background-modifier-border);
+	background-color: var(--background-secondary);
+	border-radius: var(--radius-s);
+	padding: 4px;
+	user-select: none;
+	width: 100%;
+}
+.sketchpad-folder-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 3px 6px;
+	border-radius: var(--radius-s);
+	cursor: pointer;
+	white-space: nowrap;
+}
+.sketchpad-folder-row:hover {
+	background-color: var(--background-modifier-hover);
+}
+.sketchpad-folder-row.is-selected {
+	background-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+.sketchpad-folder-row.is-selected .sketchpad-folder-chevron {
+	opacity: 1;
+	border-left-color: var(--text-on-accent);
+}
+.sketchpad-folder-chevron {
+	flex: none;
+	width: 0;
+	height: 0;
+	border-left: 5px solid currentColor;
+	border-top: 4px solid transparent;
+	border-bottom: 4px solid transparent;
+	transition: transform 120ms ease;
+}
+.sketchpad-folder-chevron.has-children {
+	opacity: 0.7;
+}
+.sketchpad-folder-chevron.is-expanded {
+	transform: rotate(90deg);
+}
+.sketchpad-folder-chevron.is-leaf {
+	visibility: hidden;
+}
+.sketchpad-folder-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* New File modal */
+.sketchpad-open-file-modal,
+.sketchpad-new-file-modal,
+.sketchpad-export-file-modal {
+	width: auto;
+}
+.sketchpad-open-file-modal h2,
+.sketchpad-new-file-modal h2,
+.sketchpad-export-file-modal h2 {
+	justify-self: center;
+}
+.sketchpad-export-file-body,
+.sketchpad-new-file-body {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+.sketchpad-export-file-row,
+.sketchpad-new-file-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+.sketchpad-new-file-row label {
+	text-wrap: nowrap;
+}
+.sketchpad-new-file-row input[type='color'].sketchpad-paper-color-picker {
+	margin-left: 0;
+	height: var(--input-height);
+}
+.sketchpad-new-file-row input[type='color'].sketchpad-paper-color-picker::-webkit-color-swatch 
+{
+	height: var(--input-height);
+}
+.sketchpad-export-file-modal .sketchpad-export-file-name {
+	flex: 1;
+	min-width: 0;
+}
+.sketchpad-export-file-folder-section,
+.sketchpad-new-file-folder-section {
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+	width: 100%;
+}
+.sketchpad-folder-summary {
+	font-size: 0.9em;
+	color: var(--text-muted);
+}
+.sketchpad-export-file-button-row,
+.sketchpad-new-file-button-row {
+	display: flex;
+	justify-content: flex-end;
+	gap: 10px;
+}
+.sketchpad-export-file-button-row button,
+.sketchpad-new-file-button-row button {
+	min-width: 80px;	
+}
+
+/* Open File modal */
+.sketchpad-open-file-body {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	justify-content: center;
+}
+.sketchpad-open-file-tree {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 10px;	
+}
+.sketchpad-file-thumbnail-grid {
+	flex: 1;
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+	gap: 8px;
+	min-height: 480px;
+	max-height: 480px;
+	overflow-y: auto;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	background-color: var(--background-secondary);
+	padding: 6px;
+}
+.sketchpad-file-thumbnail-empty {
+	text-align: center;
+	text-wrap: nowrap;
+	padding-left: 10px;
+	color: var(--text-muted);
+}
+.sketchpad-file-thumbnail-card {
+	cursor: pointer;
+	border-radius: var(--radius-s);
+	padding: 6px;
+	text-align: center;
+	align-self: start;
+}
+.sketchpad-file-thumbnail-card:hover {
+	background-color: var(--background-modifier-hover);
+}
+.sketchpad-file-thumbnail-card.is-selected {
+	background-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+.sketchpad-file-thumbnail-img {
+	width: 100%;
+	aspect-ratio: 1 / 1;
+	object-fit: contain;
+	border-radius: var(--radius-s);
+	background-color: var(--background-modifier-hover);
+	pointer-events: none;
+}
+.sketchpad-file-thumbnail-img.is-empty {
+	opacity: 0.4;
+}
+.sketchpad-file-thumbnail-name {
+	font-size: var(--font-ui-small);
+	margin-top: 4px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	display: -webkit-box;
+	line-clamp: 2;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	word-break: break-word;
+}
+.sketchpad-open-file-button {
+	margin-top: 10px;
+	margin-left: auto;
+	min-width: 80px; 
+}
+
+/* ORA embed previews in notes */
+.file-embed.mod-generic.sketchpad-ora-embed {
+	display: block;
+	margin: 4px 0;
+	border-radius: 0;
+	padding: 0;
+}
+.sketchpad-ora-embed img {
+	max-width: 100%;
+	height: auto;
+}
+
+
+/* Custom positioned sidebars */
+.sketchpad-left-sidebar.sketchpad-panel-positioned,
+.sketchpad-right-sidebar.sketchpad-panel-positioned {
+	right: auto;
+	margin: 0;
+}
+.sketchpad-vertical-toolbar-label,
+.sketchpad-view-controls-label {
+	text-align: center;
+	font-size: 0.7em;
+	overflow: hidden;
+}
+
+/* Minimal UI adjustments */
+.sketchpad-left-sidebar.sketchpad-minimal {
+	position: absolute;
+	left: 0;
+	height: auto;
+	background: var(--background-primary);
+
+	border-radius: var(--radius-m);
+	border: 1px solid var(--background-modifier-border);
+	margin-top: 10px;
+	margin-left: 10px;
+}
+.sketchpad-right-sidebar.sketchpad-minimal {
+	position: absolute;
+	right: 0;
+	height: auto; 
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	margin-top: 10px;
+	margin-right: 10px;
+}
+.sketchpad-minimal .sketchpad-view-controls,
+.sketchpad-minimal .sketchpad-vertical-toolbar {
+	height: 420px;
+	width: 30px;
+	border: 0;
+	gap: 5px;
+}
+.sketchpad-minimal .sketchpad-layer-controls {
+	border-right: 1px solid var(--background-modifier-border);
+}
+.sketchpad-minimal .sketchpad-tool-settings {
+	border-left: 1px solid var(--background-modifier-border);
+}
+
+.sketchpad-minimal .sketchpad-view-controls-button {
+	width: 80%;
+	padding: 0;
+}
+.sketchpad-minimal .sketchpad-view-controls-button svg{
+	width: 22px;
+	height: 22px;
+}
+
+.sketchpad-minimal input[type='range'].sketchpad-vertical-slider {
+	writing-mode: vertical-lr;
+	direction: rtl;
+	align-self: center;
+	height: 100%;
+	width: 18px;
+}
+
+.sketchpad-minimal input[type='range'].sketchpad-vertical-slider::-webkit-slider-thumb {
+	appearance: none;
+    -webkit-appearance: none;
+	border-radius: 20%;
+	width: 18px;
+	height: 18px;
+	top: 0;
+	background-color: var(--text-muted);
+}
+.sketchpad-minimal input[type='color'].sketchpad-color-picker {
+    width: 24px;
+    height: 24px;
+}
+
+.sketchpad-minimal input[type='color'].sketchpad-color-picker::-webkit-color-swatch {
+	height: 20px;
+}
+
+/* Mobile UI adjustments */
+body.is-mobile .sketchpad-view-controls-button {
+	padding: 0;
+}
+body.is-mobile .sketchpad-vertical-toolbar,
+body.is-mobile .sketchpad-view-controls {
+	height: 500px;
+}
+body.is-mobile .sketchpad-tool {
+	height: 30px;
+}
+body.is-mobile .sketchpad-tool svg {
+	width: 20px;
+	height: 20px;
+}
