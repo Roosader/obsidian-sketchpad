@@ -678,6 +678,10 @@ input[type='range'].sketchpad-okhsl-slider::-webkit-slider-thumb {
 .sketchpad-confirm-modal {
 	width: 350px;
 }
+.sketchpad-confirm-modal .modal-content div {
+  display: flex;
+  justify-content: end;
+}
 .sketchpad-confirm-modal button {
 	min-width: 80px;
 	margin-left: 10px;
