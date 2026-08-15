@@ -80,6 +80,11 @@ export default class SketchpadView extends ItemView {
 	private hotkeyController!: HotkeyController;
 	private drawingController!: DrawingController;
 
+	// the leaf's original detach(), saved so the constructor's tab-close
+	// interception can be undone on close (avoids retaining this view on a
+	// long-lived WorkspaceLeaf).
+	private originalLeafDetach!: () => void;
+
 	constructor(leaf: WorkspaceLeaf, private readonly plugin: SketchpadPlugin) {
 		super(leaf);
 		this.documentState = cloneDocument(DEFAULT_DOCUMENT);
@@ -134,11 +139,11 @@ export default class SketchpadView extends ItemView {
 		this.headerEl.insertBefore(closeButton, this.headerEl.querySelector('.view-actions'));
 
 		// intercept tab closes to offer to save an open file 
-		const originalDetach = this.leaf.detach.bind(this.leaf);
+		this.originalLeafDetach = this.leaf.detach.bind(this.leaf);
 		let closePromptOpen = false;
 		this.leaf.detach = (): void => {
 			if (!this.hasOpenFile || closePromptOpen || !this.documentDirty) {
-				originalDetach();
+				this.originalLeafDetach();
 				return;
 			}
 			closePromptOpen = true;
@@ -160,7 +165,7 @@ export default class SketchpadView extends ItemView {
 				} finally {
 					closePromptOpen = false;
 				}
-				originalDetach();
+				this.originalLeafDetach();
 			})();
 		};
 	}
@@ -690,6 +695,9 @@ export default class SketchpadView extends ItemView {
 		this.hotkeyController?.clearTempToolHold();
 		this.cursorOverlay?.destroy();
 		this.engine?.destroy();
+		// undo the tab-close interception installed in the constructor so this
+		// view isn't retained through the leaf's detach closure.
+		this.leaf.detach = this.originalLeafDetach;
 	}
 
 	private renderView(): void {
