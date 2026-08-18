@@ -77,7 +77,7 @@ export default class SketchpadPlugin extends Plugin {
 
 		this.toolSettings = cloneToolSettings(data?.toolSettings);
 		this.touchCanvasControlsEnabled = data?.touchCanvasControlsEnabled ?? false;
-		this.minimalUI = data?.minimalUI ?? false;
+		this.minimalUI = data?.minimalUI ?? true;
 		this.leftSidebarPos = sanitizePanelPos(data?.leftSidebarPos);
 		this.rightSidebarPos = sanitizePanelPos(data?.rightSidebarPos);
 		this.toolHotkeys = { ...DEFAULT_TOOL_HOTKEYS, ...(data?.toolHotkeys ?? {}) };
