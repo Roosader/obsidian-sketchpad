@@ -36,6 +36,7 @@ export class DrawingController {
 
 	// handles pointer events that start from outside image
 	pointerDown(event: PointerEvent): void {
+		this.deps.viewport.invalidateGeometryCache();
 		if (this.deps.viewport.tryHandleTouchPointerDown(event)) {
 			return;
 		}
@@ -103,6 +104,7 @@ export class DrawingController {
 	};
 
 	handlePointerDown = (event: PointerEvent): void => {
+		this.deps.viewport.invalidateGeometryCache();
 		if (this.deps.viewport.tryHandleTouchPointerDown(event)) {
 			return;
 		}

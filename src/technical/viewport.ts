@@ -44,6 +44,9 @@ export class CanvasViewport {
 		stackCenter: { x: 0, y: 0 },
 	};
 	private rotatePreviousAngle = 0;
+	// cached screen-space center of the canvas stack (transform-origin), which
+	// only changes when the panel or stack geometry changes, not while drawing
+	private cachedStackCenter: { x: number; y: number } | null = null;
 	private activeTouchPoints = new Map<number, { x: number; y: number }>();
 	private touchPanStart: { x: number; y: number; panX: number; panY: number } | null = null;
 	private touchGestureStart: {
@@ -72,11 +75,25 @@ export class CanvasViewport {
 	// center of the canvas-stack box in screen coordinates
 	// transform anchor for zoom, flip
 	private getStackCenter(): { x: number; y: number } {
+		if (!this.cachedStackCenter) {
+			this.cachedStackCenter = this.computeStackCenter();
+		}
+		return this.cachedStackCenter;
+	}
+
+	private computeStackCenter(): { x: number; y: number } {
 		const panelRect = this.deps.canvasPanel.getBoundingClientRect();
 		return {
 			x: panelRect.left + this.deps.canvasStack.offsetLeft + this.size.width / 2,
 			y: panelRect.top + this.deps.canvasStack.offsetTop + this.size.height / 2,
 		};
+	}
+
+	// the cached stack center depends on the panel's screen position and the
+	// stack's size/position, none of which change while drawing. Call this
+	// whenever those could have changed so the next read recomputes fresh.
+	invalidateGeometryCache(): void {
+		this.cachedStackCenter = null;
 	}
 
 	// center of the canvas panel (the on-screen viewport) in screen coordinates. 
@@ -225,6 +242,7 @@ export class CanvasViewport {
 		if (!this.deps.isActive()) {
 			return;
 		}
+		this.invalidateGeometryCache();
 		event.preventDefault();
 		const factor = event.deltaY < 0 ? WHEEL_ZOOM_FACTOR : 1 / WHEEL_ZOOM_FACTOR;
 		const newZoom = clampZoom(this.view.zoom * factor);
@@ -336,6 +354,7 @@ export class CanvasViewport {
 		const top = (panelRect.height - this.size.height) / 2;
 		this.deps.canvasStack.style.left = `${left}px`;
 		this.deps.canvasStack.style.top = `${top}px`;
+		this.invalidateGeometryCache();
 	}
 
 	updateViewControlsUI(): void {
