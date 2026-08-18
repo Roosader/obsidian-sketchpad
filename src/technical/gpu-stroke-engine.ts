@@ -99,7 +99,9 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.maxBlendEquation = gpu.maxBlendEquation;
 		this.onChange = onChange;
 
-		const context = canvas.getContext('webgl2', { alpha: true, antialias: false, premultipliedAlpha: false });
+		// preserveDrawingBuffer keeps the previous frame's pixels around so the
+		// scissored stroke preview can update only the dirty region each frame.
+		const context = canvas.getContext('webgl2', { alpha: true, antialias: false, premultipliedAlpha: false, preserveDrawingBuffer: true });
 		if (!context) {
 			throw new Error('WebGL2 context unavailable on this canvas');
 		}
@@ -223,8 +225,10 @@ export class GpuStrokeEngine implements DrawingEngine {
 		} else {
 			const opacity = layer.opacity / 100;
 			const blendMode = layer.blendMode === 'multiply' ? 1 : 0;
-			// single pass composites below + stroke + above straight to the canvas.
-			this.runStrokePreviewPass(this.belowCacheTex, this.previewComposeTex, this.aboveCacheTex, opacity, blendMode);
+			// single pass composites below + stroke + above straight to the canvas,
+			// scissored to the newly-dirtied region so fragment work scales with
+			// the stroke instead of the whole document.
+			this.runStrokePreviewPass(this.belowCacheTex, this.previewComposeTex, this.aboveCacheTex, opacity, blendMode, scissor);
 		}
 	}
 
@@ -858,8 +862,8 @@ export class GpuStrokeEngine implements DrawingEngine {
 	}
 
 	// composites below + stroke + above in a single full-canvas pass
-	private runStrokePreviewPass(belowTex: GpuTexture, strokeTex: GpuTexture, aboveTex: GpuTexture, opacity: number, blendMode: number): void {
-		this.bindTarget(null, [0, 0, 0, 0], null);
+	private runStrokePreviewPass(belowTex: GpuTexture, strokeTex: GpuTexture, aboveTex: GpuTexture, opacity: number, blendMode: number, scissor: ScissorRect | null = null): void {
+		this.bindTarget(null, [0, 0, 0, 0], scissor);
 		this.gl.useProgram(this.strokePreviewProgram.program);
 		this.gl.uniform1f(this.uniform(this.strokePreviewProgram, 'uOpacity'), opacity);
 		this.gl.uniform1i(this.uniform(this.strokePreviewProgram, 'uBlendMode'), blendMode);
