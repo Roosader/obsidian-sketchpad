@@ -11,13 +11,15 @@ export interface ViewportDeps {
 	getCurrentTool: () => ViewTool;
 	getViewControls: () => ViewControlElements | undefined;
 	isActive: () => boolean;
-	isTouchControlsEnabled: () => boolean;
+	isTouchToDrawEnabled: () => boolean;
 
 	refreshCursorOverlay?: () => void;	// called when the custom tool cursor should be redrawn
 
 	onViewTransformChange?: () => void; //called on zoom/rotate/flip/fit
 
 	onTouchTap?: (fingerCount: number) => void; //for multi-touch undo/redo
+
+	onMultiTouchGestureStart?: () => void;
 }
 
 const TOUCH_TAP_MOVE_PX = 12; // max any finger may drift from its down point (screen CSS px)
@@ -58,6 +60,7 @@ export class CanvasViewport {
 	private touchTapMaxPoints = 0;
 	private touchTapStartTime = 0;
 	private touchTapMoved = false;
+	private touchGestureActive = false;
 
 	constructor(private readonly deps: ViewportDeps) {}
 
@@ -417,15 +420,8 @@ export class CanvasViewport {
 	}
 
 	/* touch input handling */
-	syncTouchInputMode(): void {
-		const touchAction = this.deps.isTouchControlsEnabled() ? 'none' : '';
-		this.deps.canvasPanel.style.touchAction = touchAction;
-		this.deps.canvas.style.touchAction = touchAction;
-	}
-
 	tryHandleTouchPointerDown(event: PointerEvent): boolean {
-		this.syncTouchInputMode();
-		if (!this.deps.isTouchControlsEnabled() || event.pointerType !== 'touch') {
+		if (event.pointerType !== 'touch') {
 			return false;
 		}
 
@@ -436,23 +432,33 @@ export class CanvasViewport {
 			this.touchTapMaxPoints = 1;
 			this.touchTapStartTime = performance.now();
 			this.touchTapMoved = false;
+			this.touchGestureActive = !this.deps.isTouchToDrawEnabled();
 		}
 		this.activeTouchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
 		this.touchTapDownPositions.set(event.pointerId, { x: event.clientX, y: event.clientY });
 		this.touchTapMaxPoints = Math.max(this.touchTapMaxPoints, this.activeTouchPoints.size);
 
 		if (this.activeTouchPoints.size >= 2) {
+
+			if (!this.touchGestureActive) {
+				this.touchGestureActive = true;
+				this.deps.onMultiTouchGestureStart?.();
+			}
 			this.initializeTouchTransformGesture();
-		} else {
-			this.initializeTouchPanGesture();
+			return true;
 		}
 
-		return true;
+		if (this.touchGestureActive) {
+			this.initializeTouchPanGesture();
+			return true;
+		}
+
+		// single finger + touch-to-draw enabled: let the drawing controller handle it
+		return false;
 	}
 
 	tryHandleTouchPointerMove(event: PointerEvent): boolean {
-		this.syncTouchInputMode();
-		if (!this.deps.isTouchControlsEnabled() || event.pointerType !== 'touch') {
+		if (event.pointerType !== 'touch') {
 			return false;
 		}
 
@@ -475,6 +481,10 @@ export class CanvasViewport {
 			}
 		}
 
+		if (!this.touchGestureActive) {
+			return false;
+		}
+
 		if (this.activeTouchPoints.size >= 2) {
 			this.updateTouchTransformGesture();
 		} else {
@@ -485,8 +495,7 @@ export class CanvasViewport {
 	}
 
 	tryHandleTouchPointerUp(event: PointerEvent): boolean {
-		this.syncTouchInputMode();
-		if (!this.deps.isTouchControlsEnabled() || event.pointerType !== 'touch') {
+		if (event.pointerType !== 'touch') {
 			return false;
 		}
 
@@ -497,6 +506,11 @@ export class CanvasViewport {
 		}
 		this.activeTouchPoints.delete(event.pointerId);
 		this.touchTapDownPositions.delete(event.pointerId);
+
+		if (!this.touchGestureActive) {
+			this.resetTouchGestureState();
+			return false;
+		}
 
 		if (this.activeTouchPoints.size >= 2) {
 			this.initializeTouchTransformGesture();
@@ -518,14 +532,18 @@ export class CanvasViewport {
 		) {
 			this.deps.onTouchTap?.(this.touchTapMaxPoints);
 		}
+		this.resetTouchGestureState();
+		return true;
+	}
+
+	private resetTouchGestureState(): void {
+		this.touchGestureActive = false;
 		this.touchTapActive = false;
 		this.touchTapMaxPoints = 0;
 		this.touchTapStartTime = 0;
 		this.touchTapMoved = false;
-
 		this.touchPanStart = null;
 		this.touchGestureStart = null;
-		return true;
 	}
 
 	private initializeTouchPanGesture(): void {

@@ -46,6 +46,8 @@ interface SketchpadPluginData {
 export default class SketchpadPlugin extends Plugin {
 
 	toolSettings: ToolSettingsMap = cloneToolSettings();
+	// When enabled, one finger draws and two-finger pan/zoom/rotate plus
+	// undo/redo taps are always active. When disabled, one finger pans instead.
 	touchCanvasControlsEnabled = false;
 	minimalUI = true;
 	leftSidebarPos: { x: number; y: number } | null = null;

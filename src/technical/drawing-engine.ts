@@ -10,6 +10,8 @@ export interface DrawingEngine {
 	appendPoint(point: Point): void;
 	beginStroke(layer: OraLayer, point: Point, stroke: StrokeParams & { tool: ToolName }): void;
 	finishStroke(layer: OraLayer): void;
+	// discards an in-progress stroke without committing it to history
+	cancelStroke(): void;
 
 	// renders the flattened document
 	renderBase(): void;

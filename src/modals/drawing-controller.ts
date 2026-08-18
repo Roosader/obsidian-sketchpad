@@ -87,7 +87,8 @@ export class DrawingController {
 
 	// handle pointer events that start from inside image
 	handlePointerEnter = (event: PointerEvent): void => {
-		if (this.deps.plugin.touchCanvasControlsEnabled && event.pointerType === 'touch') {
+
+		if (event.pointerType === 'touch') {
 			return;
 		}
 		const primaryButtonHeld = (event.buttons & 1) !== 0;
@@ -202,6 +203,17 @@ export class DrawingController {
 		this.deps.refreshUndoRedoUI();
 		this.deps.render();
 	};
+
+	// cancels an in-progress one-finger stroke when a second finger lands
+	cancelActiveStroke(): void {
+		if (this.deps.engine.isDrawing() && this.activeDrawTool) {
+			this.deps.engine.cancelStroke();
+			this.activeDrawTool = null;
+		}
+		this.pointerIsDown = false;
+		this.drawingStarted = false;
+		this.deps.render();
+	}
 
 	// helpers
 	private drawLivePreview(tool: ToolName): void {

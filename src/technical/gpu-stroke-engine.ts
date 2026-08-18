@@ -187,6 +187,16 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.opacitySampler = null;
 	}
 
+	cancelStroke(): void {
+		if (!this.currentStroke) {
+			return;
+		}
+		this.history.cancelStroke();
+		this.currentStroke = null;
+		this.sizeSampler = null;
+		this.opacitySampler = null;
+	}
+
 	renderBase(): void {
 		if (this.destroyed) {
 			return;

@@ -452,7 +452,6 @@ export default class SketchpadView extends ItemView {
 			() => this.plugin.toolSettings[this.toolController?.getLastDrawTool() ?? 'pencil'].size,
 			() => this.viewport?.view.zoom ?? 1,
 			() => this.toolSelected,
-			() => this.plugin.touchCanvasControlsEnabled,
 		);
 		const cursorResizeObserver = new ResizeObserver(() => this.cursorOverlay?.resize());
 		cursorResizeObserver.observe(this.canvasPanel);
@@ -478,10 +477,12 @@ export default class SketchpadView extends ItemView {
 			getCurrentTool: () => this.toolController?.getCurrentTool() ?? 'pencil',
 			getViewControls: () => this.viewControls,
 			isActive: () => this.app.workspace.getActiveViewOfType(SketchpadView) === this,
-			isTouchControlsEnabled: () => this.plugin.touchCanvasControlsEnabled,
+			isTouchToDrawEnabled: () => this.plugin.touchCanvasControlsEnabled,
 			refreshCursorOverlay: () => this.cursorOverlay?.refresh(),
 
 			onViewTransformChange: () => this.selectionController?.refreshOverlay(),
+
+			onMultiTouchGestureStart: () => this.drawingController?.cancelActiveStroke(),
 
 			onTouchTap: (fingers) => {
 				if (fingers === 2) {
@@ -677,8 +678,7 @@ export default class SketchpadView extends ItemView {
 		this.registerDomEvent(window, 'keydown', this.hotkeyController.handleKeyDown);
 		this.registerDomEvent(window, 'keyup', this.hotkeyController.handleKeyUp);
 		this.registerDomEvent(this.canvasPanel, 'wheel', this.viewport.handleWheel, { passive: false });
-		this.viewport.syncTouchInputMode();
-	
+
 		this.updateToolSettingsUI();
 		this.updateNoFileUI();
 		this.cursorOverlay?.refresh();
