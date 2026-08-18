@@ -175,14 +175,16 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.updateStrokeTextures();
 
 		const liveTex = this.layerTextures.get(layer.name);
-		if (liveTex) {
-			const scissor = this.toScissorRect(this.strokeBounds);
-			if (scissor) {
-				this.runStrokeCompositePass(liveTex, this.strokeColorTex, this.baselineTex, this.strokeCompositeMode(), scissor);
-			}
+		const scissor = this.toScissorRect(this.strokeBounds);
+		if (liveTex && scissor) {
+			// snapshot the region that is about to change before compositing,
+			// so undo only stores (and restores) the pixels the stroke touched
+			this.history.commitStroke(layer.name, liveTex, scissor);
+			this.runStrokeCompositePass(liveTex, this.strokeColorTex, this.baselineTex, this.strokeCompositeMode(), scissor);
+		} else {
+			this.history.cancelStroke();
 		}
 
-		this.history.commitStroke();
 		this.onChange?.();
 		this.currentStroke = null;
 		this.sizeSampler = null;
@@ -311,7 +313,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.selectionLayerName = layer.name;
 		this.selectionBounds = { left, top, width: right - left, height: bottom - top };
 
-		this.history.beginStroke(layer.name, liveTex);
+		this.history.beginSelectionSnapshot(layer.name, liveTex);
 		// copy layer before the selection hole is cut 
 		copyTexture(this.gl, liveTex, this.selectionOriginalTex, this.width, this.height);
 		this.runSelectionExtractPass(liveTex);
@@ -337,7 +339,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 				this.history.cancelStroke();
 			} else {
 				this.runSelectionQuadPass(liveTex, transform);
-				this.history.commitStroke();
+				this.history.commitSelectionSnapshot();
 				this.onChange?.();
 			}
 		}
@@ -349,7 +351,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		if (!this.selectionBounds || this.selectionLayerName !== layer.name) {
 			return;
 		}
-		this.history.cancelStrokeAndRestore(this.layerTextures);
+		this.history.cancelSelectionAndRestore(this.layerTextures);
 		this.selectionBounds = null;
 		this.selectionLayerName = null;
 	}
@@ -596,7 +598,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		if (liveTex) {
 			copyTexture(this.gl, liveTex, this.baselineTex, this.width, this.height);
 			copyTexture(this.gl, liveTex, this.previewComposeTex, this.width, this.height);
-			this.history.beginStroke(layer.name, liveTex);
+			this.history.beginStroke(layer.name);
 		}
 	}
 
