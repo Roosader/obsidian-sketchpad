@@ -1,7 +1,7 @@
 import { App, Modal, Notice, TFile } from 'obsidian';
 import { DEFAULT_IMAGE_HEIGHT, DEFAULT_IMAGE_WIDTH, DEFAULT_FILE_NAME, MAX_IMAGE_DIMENSION } from '../utilities/constants';
 import { FolderTreeBrowser } from '../ui/folder-tree-browser';
-import { validateCrossPlatformFileName, sanitizeDimension, sanitizePaperColor, blurButtonFocusHandler } from '../utilities/utils';
+import { validateCrossPlatformFileName, sanitizeDimension, sanitizePaperColor, blurControlFocusHandler } from '../utilities/utils';
 
 export interface NewFileChoice {
     file?: TFile;
@@ -60,7 +60,7 @@ export default class NewFileModal extends Modal {
         this.contentEl.addClass('sketchpad-new-file-modal');
         // Release focus from clicked buttons so a later Space (tool hotkey)
         // doesn't natively re-activate the last-clicked button.
-        this.modalEl.addEventListener('click', blurButtonFocusHandler(), true);
+        this.modalEl.addEventListener('click', blurControlFocusHandler(), true);
         this.contentEl.createEl('h2', { text: 'Create new sketch' });
         
         const createSection = this.contentEl.createDiv();

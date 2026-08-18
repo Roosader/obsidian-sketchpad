@@ -14,7 +14,7 @@ import type SketchpadPlugin from '../main';
 import type { LayerName, OraDocument, ViewTool } from '../utilities/types';
 import { DEFAULT_FILE_NAME } from '../utilities/constants';
 import { sampleDataUrlColor } from '../utilities/layer-colors';
-import { blurButtonFocusHandler } from '../utilities/utils';
+import { blurControlFocusHandler } from '../utilities/utils';
 import { parseOraArchive } from '../ora/ora-parser';
 import { CanvasViewport } from '../technical/viewport';
 import { ToolController } from './tool-controller';
@@ -647,7 +647,7 @@ export default class SketchpadView extends ItemView {
 		// content) so a later Space — used as a tool hotkey — doesn't natively
 		// re-activate the last-clicked button. Capture phase so it also covers
 		// buttons whose handlers stop propagation.
-		this.registerDomEvent(this.containerEl, 'click', blurButtonFocusHandler(), true);
+		this.registerDomEvent(this.containerEl, 'click', blurControlFocusHandler(), true);
 
 		if (supportsRawPointerUpdate) {
 			const onPanelRawMove = (event: Event): void => {

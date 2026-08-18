@@ -1,6 +1,6 @@
 import { App, Modal, Notice } from 'obsidian';
 import { FolderTreeBrowser } from '../ui/folder-tree-browser';
-import { validateCrossPlatformFileName, blurButtonFocusHandler } from '../utilities/utils';
+import { validateCrossPlatformFileName, blurControlFocusHandler } from '../utilities/utils';
 
 export interface ExportFileChoice {
 	options: {
@@ -38,7 +38,7 @@ export default class ExportFileModal extends Modal {
 		this.contentEl.addClass('sketchpad-export-file-modal');
 		// Release focus from clicked buttons so a later Space (tool hotkey)
 		// doesn't natively re-activate the last-clicked button.
-		this.modalEl.addEventListener('click', blurButtonFocusHandler(), true);
+		this.modalEl.addEventListener('click', blurControlFocusHandler(), true);
 		this.contentEl.createEl('h2', { text: 'Export merged image' });
 
 		const body = this.contentEl.createDiv({ cls: 'sketchpad-export-file-body' });

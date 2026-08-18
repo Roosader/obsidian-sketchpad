@@ -103,9 +103,16 @@ export function sanitizePanelPos(value: { x: number; y: number } | undefined): {
     return { x: value.x, y: value.y };
 }
 
-// releases focus from any clicked <button> so that pressing Space (tool hotkey) later doesn't natively re-activate the last-clicked button
-export function blurButtonFocusHandler(): (event: MouseEvent) => void {
+// releases focus from any clicked interactive control (button, slider, checkbox,
+// radio, select, color picker) so that pressing Space (tool hotkey) later doesn't
+// natively re-activate the last-clicked control. Text/number inputs are left
+// focused so the user can keep typing.
+export function blurControlFocusHandler(): (event: MouseEvent) => void {
     return (event: MouseEvent) => {
-        (event.target as HTMLElement | null)?.closest('button')?.blur();
+        const target = event.target as HTMLElement | null;
+        const control = target?.closest<HTMLElement>(
+            'button, input[type="range"], input[type="checkbox"], input[type="radio"], input[type="color"], select',
+        );
+        control?.blur();
     };
 }

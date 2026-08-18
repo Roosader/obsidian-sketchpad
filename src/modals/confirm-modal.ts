@@ -1,5 +1,5 @@
 import { App, Modal } from "obsidian";
-import { blurButtonFocusHandler } from '../utilities/utils';
+import { blurControlFocusHandler } from '../utilities/utils';
 
 export type ConfirmChoice = 'yes' | 'no' | 'cancel';
 
@@ -27,7 +27,7 @@ export class ConfirmModal extends Modal {
 	onOpen(): void {
 		// Release focus from clicked buttons so a later Space (tool hotkey)
 		// doesn't natively re-activate the last-clicked button.
-		this.modalEl.addEventListener('click', blurButtonFocusHandler(), true);
+		this.modalEl.addEventListener('click', blurControlFocusHandler(), true);
 
 		const { contentEl } = this;
 		contentEl.createEl("p", { text: this.message });
