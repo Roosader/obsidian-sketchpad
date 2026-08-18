@@ -9,7 +9,7 @@ import { sanitizeAutosaveInterval, sanitizeDimension, sanitizeGridOpacity, sanit
 
 interface SketchpadPluginData {
 	toolSettings?: Partial<Record<ToolName, Partial<ToolSettings>>>;
-	touchCanvasControlsEnabled?: boolean;
+	touchToDrawEnabled?: boolean;
 
 	minimalUI?: boolean;
 
@@ -46,7 +46,7 @@ interface SketchpadPluginData {
 export default class SketchpadPlugin extends Plugin {
 
 	toolSettings: ToolSettingsMap = cloneToolSettings();
-	touchCanvasControlsEnabled = false;
+	touchToDrawEnabled = false;
 	minimalUI = true;
 	leftSidebarPos: { x: number; y: number } | null = null;
 	rightSidebarPos: { x: number; y: number } | null = null;
@@ -76,7 +76,7 @@ export default class SketchpadPlugin extends Plugin {
 		const data = (await this.loadData()) as SketchpadPluginData | null;
 
 		this.toolSettings = cloneToolSettings(data?.toolSettings);
-		this.touchCanvasControlsEnabled = data?.touchCanvasControlsEnabled ?? false;
+		this.touchToDrawEnabled = data?.touchToDrawEnabled ?? false;
 		this.minimalUI = data?.minimalUI ?? true;
 		this.leftSidebarPos = sanitizePanelPos(data?.leftSidebarPos);
 		this.rightSidebarPos = sanitizePanelPos(data?.rightSidebarPos);
@@ -180,7 +180,7 @@ export default class SketchpadPlugin extends Plugin {
 	async saveToolSettings(): Promise<void> {
 		await this.saveData({
 			toolSettings: this.toolSettings,
-			touchCanvasControlsEnabled: this.touchCanvasControlsEnabled,
+			touchToDrawEnabled: this.touchToDrawEnabled,
 			minimalUI: this.minimalUI,
 			leftSidebarPos: this.leftSidebarPos ?? undefined,
 			rightSidebarPos: this.rightSidebarPos ?? undefined,

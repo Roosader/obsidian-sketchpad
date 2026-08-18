@@ -478,7 +478,7 @@ export default class SketchpadView extends ItemView {
 			getCurrentTool: () => this.toolController?.getCurrentTool() ?? 'pencil',
 			getViewControls: () => this.viewControls,
 			isActive: () => this.app.workspace.getActiveViewOfType(SketchpadView) === this,
-			isTouchToDrawEnabled: () => this.plugin.touchCanvasControlsEnabled,
+			isTouchToDrawEnabled: () => this.plugin.touchToDrawEnabled,
 			refreshCursorOverlay: () => this.cursorOverlay?.refresh(),
 
 			onViewTransformChange: () => this.selectionController?.refreshOverlay(),

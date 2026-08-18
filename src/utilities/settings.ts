@@ -70,9 +70,9 @@ export class SketchpadSettingTab extends PluginSettingTab
             .setDesc('When enabled, draw with one finger. Two fingers always pan, pinch to zoom, and twist to rotate. Two-finger tap to undo. Three-finger tap to redo. When disabled, one finger pans instead.')
             .addToggle((toggle) => {
                 toggle
-                    .setValue(this.plugin.touchCanvasControlsEnabled)
+                    .setValue(this.plugin.touchToDrawEnabled)
                     .onChange(async (value) => {
-                        this.plugin.touchCanvasControlsEnabled = value;
+                        this.plugin.touchToDrawEnabled = value;
                         await this.plugin.saveToolSettings();
                     });
             });
