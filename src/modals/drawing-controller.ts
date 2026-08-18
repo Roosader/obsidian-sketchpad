@@ -204,10 +204,16 @@ export class DrawingController {
 		this.deps.render();
 	};
 
-	// cancels an in-progress one-finger stroke when a second finger lands
-	cancelActiveStroke(): void {
+	// called when a second finger lands during one-finger touch drawing
+	commitActiveStroke(wasTapCandidate: boolean): void {
 		if (this.deps.engine.isDrawing() && this.activeDrawTool) {
-			this.deps.engine.cancelStroke();
+			if (!wasTapCandidate) {
+				const layer = this.deps.tools.getTargetLayer(this.activeDrawTool);
+				this.deps.engine.finishStroke(layer);
+				this.deps.refreshUndoRedoUI();
+			} else {
+				this.deps.engine.cancelStroke();
+			}
 			this.activeDrawTool = null;
 		}
 		this.pointerIsDown = false;

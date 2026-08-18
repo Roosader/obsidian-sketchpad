@@ -482,7 +482,7 @@ export default class SketchpadView extends ItemView {
 
 			onViewTransformChange: () => this.selectionController?.refreshOverlay(),
 
-			onMultiTouchGestureStart: () => this.drawingController?.cancelActiveStroke(),
+			onMultiTouchGestureStart: (wasTap) => this.drawingController?.commitActiveStroke(wasTap),
 
 			onTouchTap: (fingers) => {
 				if (fingers === 2) {

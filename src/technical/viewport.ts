@@ -19,7 +19,8 @@ export interface ViewportDeps {
 
 	onTouchTap?: (fingerCount: number) => void; //for multi-touch undo/redo
 
-	onMultiTouchGestureStart?: () => void;
+	// fired when a second finger lands while touch-to-draw is enabled
+	onMultiTouchGestureStart?: (wasTapCandidate: boolean) => void;
 }
 
 const TOUCH_TAP_MOVE_PX = 12; // max any finger may drift from its down point (screen CSS px)
@@ -439,10 +440,11 @@ export class CanvasViewport {
 		this.touchTapMaxPoints = Math.max(this.touchTapMaxPoints, this.activeTouchPoints.size);
 
 		if (this.activeTouchPoints.size >= 2) {
-
+			// a second finger arrived mid-stroke: switch to a view gesture and
+			// preserve or discard the in-progress one-finger stroke.
 			if (!this.touchGestureActive) {
 				this.touchGestureActive = true;
-				this.deps.onMultiTouchGestureStart?.();
+				this.deps.onMultiTouchGestureStart?.(!this.touchTapMoved);
 			}
 			this.initializeTouchTransformGesture();
 			return true;
