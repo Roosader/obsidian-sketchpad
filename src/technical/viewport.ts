@@ -160,6 +160,7 @@ export class CanvasViewport {
 
 	/* Zoom functions */
 	setZoom(zoom: number): void {
+		this.invalidateGeometryCache();
 		const clamped = clampZoom(zoom);
 		if (clamped === this.view.zoom) {
 			return;
@@ -286,6 +287,7 @@ export class CanvasViewport {
 	}
 
 	setRotation(rotation: number): void {
+		this.invalidateGeometryCache();
 		const clamped = clampRotation(rotation);
 		if (clamped === this.view.rotation) {
 			return;
@@ -298,6 +300,7 @@ export class CanvasViewport {
 	// rotates the canvas by the given number of degrees (counter-clockwise
 	// for negative values), normalizing to (-180, 180].
 	rotateBy(degrees: number): void {
+		this.invalidateGeometryCache();
 		this.rotateAroundScreenCenter(degrees);
 	}
 
@@ -311,6 +314,7 @@ export class CanvasViewport {
 
 	// flips the canvas around the center of the screen, not the center of the image
 	toggleFlip(axis: 'flipX' | 'flipY'): void {
+		this.invalidateGeometryCache();
 		this.view[axis] = !this.view[axis];
 		this.view.rotation = -this.view.rotation;
 
