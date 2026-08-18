@@ -87,6 +87,10 @@ export class GpuStrokeEngine implements DrawingEngine {
 	private dirtyBounds: Bounds = { ...EMPTY_BOUNDS };
 	private rgbColor = { r: 0, g: 0, b: 0 };
 	private lastStackResult!: GpuTexture;
+	// persistent full-canvas framebuffer holding the last composited frame, so
+	// the scissored stroke preview can update only the dirty region without
+	// relying on preserveDrawingBuffer
+	private displayTex!: GpuTexture;
 
 	private activeLayerHasMultiplyAbove = false;
 	
@@ -99,9 +103,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.maxBlendEquation = gpu.maxBlendEquation;
 		this.onChange = onChange;
 
-		// preserveDrawingBuffer keeps the previous frame's pixels around so the
-		// scissored stroke preview can update only the dirty region each frame.
-		const context = canvas.getContext('webgl2', { alpha: true, antialias: false, premultipliedAlpha: false, preserveDrawingBuffer: true });
+		const context = canvas.getContext('webgl2', { alpha: true, antialias: false, premultipliedAlpha: false });
 		if (!context) {
 			throw new Error('WebGL2 context unavailable on this canvas');
 		}
@@ -206,7 +208,14 @@ export class GpuStrokeEngine implements DrawingEngine {
 			return;
 		}
 		this.compositeLayerStack(this.documentState.layers, this.scratchA, this.scratchB);
-		this.blit(this.lastStackResult);
+		this.presentComposite();
+	}
+
+	// copies the just-composited stack into the persistent display texture and
+	// presents it to the canvas
+	private presentComposite(): void {
+		copyTexture(this.gl, this.lastStackResult, this.displayTex, this.width, this.height);
+		this.blit(this.displayTex);
 	}
 
 	drawPreview(layer: OraLayer, fallbackColor: string): void {
@@ -223,14 +232,15 @@ export class GpuStrokeEngine implements DrawingEngine {
 		if (this.activeLayerHasMultiplyAbove) {
 			// a multiply layer above the active layer can't be pre-composited into the above-cache,so composite the full stack live
 			this.compositeLayerStackWithSubstitution(this.documentState.layers, layer.name, this.previewComposeTex, this.scratchA, this.scratchB);
-			this.blit(this.lastStackResult);
+			this.presentComposite();
 		} else {
 			const opacity = layer.opacity / 100;
 			const blendMode = layer.blendMode === 'multiply' ? 1 : 0;
-			// single pass composites below + stroke + above straight to the canvas,
-			// scissored to the newly-dirtied region so fragment work scales with
-			// the stroke instead of the whole document.
+			// single pass composites below + stroke + above into the persistent
+			// display texture, scissored to the newly-dirtied region so fragment
+			// work scales with the stroke instead of the whole document.
 			this.runStrokePreviewPass(this.belowCacheTex, this.previewComposeTex, this.aboveCacheTex, opacity, blendMode, scissor);
+			this.blit(this.displayTex);
 		}
 	}
 
@@ -257,11 +267,12 @@ export class GpuStrokeEngine implements DrawingEngine {
 
 		if (this.activeLayerHasMultiplyAbove) {
 			this.compositeLayerStackWithSubstitution(this.documentState.layers, layer.name, this.previewComposeTex, this.scratchA, this.scratchB);
-			this.blit(this.lastStackResult);
+			this.presentComposite();
 		} else {
 			const opacity = layer.opacity / 100;
 			const blendMode = layer.blendMode === 'multiply' ? 1 : 0;
 			this.runStrokePreviewPass(this.belowCacheTex, this.previewComposeTex, this.aboveCacheTex, opacity, blendMode);
+			this.blit(this.displayTex);
 		}
 	}
 
@@ -438,6 +449,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.destroyOwnedTexture(this.selectionMaskTex);
 		this.destroyOwnedTexture(this.selectionColorTex);
 		this.destroyOwnedTexture(this.selectionOriginalTex);
+		this.destroyOwnedTexture(this.displayTex);
 		if (this.instanceBuffer) {
 			this.gl.deleteBuffer(this.instanceBuffer);
 			this.instanceBuffer = null;
@@ -478,6 +490,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.destroyOwnedTexture(this.selectionMaskTex);
 		this.destroyOwnedTexture(this.selectionColorTex);
 		this.destroyOwnedTexture(this.selectionOriginalTex);
+		this.destroyOwnedTexture(this.displayTex);
 		this.selectionBounds = null;
 		this.selectionLayerName = null;
 
@@ -492,6 +505,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.selectionMaskTex = createLayerTexture(this.gl, this.width, this.height);
 		this.selectionColorTex = createLayerTexture(this.gl, this.width, this.height);
 		this.selectionOriginalTex = createLayerTexture(this.gl, this.width, this.height);
+		this.displayTex = createLayerTexture(this.gl, this.width, this.height);
 
 		for (const layer of documentState.layers) {
 			const texture = createLayerTexture(this.gl, this.width, this.height);
@@ -865,7 +879,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 
 	// composites below + stroke + above in a single full-canvas pass
 	private runStrokePreviewPass(belowTex: GpuTexture, strokeTex: GpuTexture, aboveTex: GpuTexture, opacity: number, blendMode: number, scissor: ScissorRect | null = null): void {
-		this.bindTarget(null, [0, 0, 0, 0], scissor);
+		this.bindTarget(this.displayTex, [0, 0, 0, 0], scissor);
 		this.gl.useProgram(this.strokePreviewProgram.program);
 		this.gl.uniform1f(this.uniform(this.strokePreviewProgram, 'uOpacity'), opacity);
 		this.gl.uniform1i(this.uniform(this.strokePreviewProgram, 'uBlendMode'), blendMode);
