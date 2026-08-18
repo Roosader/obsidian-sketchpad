@@ -614,6 +614,9 @@ export default class SketchpadView extends ItemView {
 			getToolSettingsSidebar: () => this.toolSettingsSidebar,
 		});
 
+		// when available, raw pointer updates drive the custom cursor at native rate
+		const supportsRawPointerUpdate = typeof window !== 'undefined' && 'onpointerrawupdate' in window;
+
 		// panel-level pointer routing (handles pen drawing that starts off-canvas).
 		this.registerDomEvent(this.canvasPanel, 'pointerdown', (event) => {
 			this.cursorOverlay?.handlePointerDown(event.pointerType);
@@ -623,12 +626,13 @@ export default class SketchpadView extends ItemView {
 			this.drawingController?.pointerUp(event);
 		});
 		this.registerDomEvent(this.canvasPanel, 'pointermove', (event) => {
-			// track the custom cursor first so it stays ahead of any drawing work
-			const overToolbar = (event.target as HTMLElement | null)?.closest('.sketchpad-toolbar') != null;
-			if (overToolbar) {
-				this.cursorOverlay?.handlePointerLeave();
-			} else {
-				this.cursorOverlay?.handlePointerMove(event.clientX, event.clientY, event.pointerType, event.buttons);
+			if (!supportsRawPointerUpdate) {
+				const overToolbar = (event.target as HTMLElement | null)?.closest('.sketchpad-toolbar') != null;
+				if (overToolbar) {
+					this.cursorOverlay?.handlePointerLeave();
+				} else {
+					this.cursorOverlay?.handlePointerMove(event.clientX, event.clientY, event.pointerType, event.buttons);
+				}
 			}
 			this.drawingController?.pointerMove(event);
 		});
@@ -645,8 +649,7 @@ export default class SketchpadView extends ItemView {
 		// buttons whose handlers stop propagation.
 		this.registerDomEvent(this.containerEl, 'click', blurButtonFocusHandler(), true);
 
-		// track the cursor at the raw input rate when available 
-		if (typeof window !== 'undefined' && 'onpointerrawupdate' in window) {
+		if (supportsRawPointerUpdate) {
 			const onPanelRawMove = (event: Event): void => {
 				const pe = event as PointerEvent;
 				const overToolbar = (pe.target as HTMLElement | null)?.closest('.sketchpad-toolbar') != null;
@@ -656,15 +659,9 @@ export default class SketchpadView extends ItemView {
 					this.cursorOverlay?.handlePointerMove(pe.clientX, pe.clientY, pe.pointerType, pe.buttons);
 				}
 			};
-			const onCanvasRawMove = (event: Event): void => {
-				const pe = event as PointerEvent;
-				this.cursorOverlay?.handlePointerMove(pe.clientX, pe.clientY, pe.pointerType, pe.buttons);
-			};
 			this.canvasPanel.addEventListener('pointerrawupdate', onPanelRawMove, { passive: true });
-			this.canvas.addEventListener('pointerrawupdate', onCanvasRawMove, { passive: true });
 			this.register(() => {
 				this.canvasPanel.removeEventListener('pointerrawupdate', onPanelRawMove);
-				this.canvas.removeEventListener('pointerrawupdate', onCanvasRawMove);
 			});
 		}
 
@@ -674,7 +671,9 @@ export default class SketchpadView extends ItemView {
 		});
 		this.registerDomEvent(this.canvas, 'pointerenter', this.drawingController.handlePointerEnter);
 		this.registerDomEvent(this.canvas, 'pointermove', (event) => {
-			this.cursorOverlay?.handlePointerMove(event.clientX, event.clientY, event.pointerType, event.buttons);
+			if (!supportsRawPointerUpdate) {
+				this.cursorOverlay?.handlePointerMove(event.clientX, event.clientY, event.pointerType, event.buttons);
+			}
 			this.drawingController?.handlePointerMove(event);
 		});
 		this.registerDomEvent(this.canvas, 'pointerup', this.drawingController.handlePointerUp);

@@ -27,6 +27,11 @@ export class DrawingController {
 	private lastPressureReadoutTime = 0;
 	private readonly pressureReadoutIntervalMs = 50;
 
+	// true while a preview render is already scheduled for the next animation
+	// frame, so multiple pointermove events within one frame trigger at most
+	// one GPU composite of the in-progress stroke
+	private previewFrameRequested = false;
+
 	constructor(private readonly deps: DrawingControllerDeps) {}
 
 	// handles pointer events that start from outside image
@@ -169,7 +174,7 @@ export class DrawingController {
 		for (const sample of samples) {
 			this.deps.engine.appendPoint(this.deps.viewport.getPoint(sample));
 		}
-		this.drawLivePreview(this.activeDrawTool);
+		this.schedulePreview();
 	};
 
 	handlePointerUp = (event: PointerEvent): void => {
@@ -222,6 +227,22 @@ export class DrawingController {
 	}
 
 	// helpers
+	// coalesces multiple pointermove events into a single preview render per
+	// animation frame, so the expensive full-canvas composite runs at most
+	// once per frame instead of once per pointer event.
+	private schedulePreview(): void {
+		if (this.previewFrameRequested) {
+			return;
+		}
+		this.previewFrameRequested = true;
+		window.requestAnimationFrame(() => {
+			this.previewFrameRequested = false;
+			if (this.deps.engine.isDrawing() && this.activeDrawTool) {
+				this.drawLivePreview(this.activeDrawTool);
+			}
+		});
+	}
+
 	private drawLivePreview(tool: ToolName): void {
 		const layer = this.deps.tools.getTargetLayer(tool);
 		this.deps.engine.drawPreview(layer, getLayerFallbackColor(layer.name));

@@ -361,56 +361,30 @@ export class CanvasViewport {
 	}
 
 	getPointFromClient(clientX: number, clientY: number): Point {
-		const panelRect = this.deps.canvasPanel.getBoundingClientRect();
-		const stackLeft = panelRect.left + this.deps.canvasStack.offsetLeft;
-		const stackTop = panelRect.top + this.deps.canvasStack.offsetTop;
+		// invert the canvas stack's CSS transform directly from this.view
+		const center = this.getStackCenter();
+		const ox = this.size.width / 2;
+		const oy = this.size.height / 2;
 
-		const style = getComputedStyle(this.deps.canvasStack);
-		const transformText = style.transform === 'none' ? 'matrix(1, 0, 0, 1, 0, 0)' : style.transform;
-		const matrix = new DOMMatrixReadOnly(transformText);
-		const inverse = matrix.inverse();
+		const scaleX = this.view.flipX ? -this.view.zoom : this.view.zoom;
+		const scaleY = this.view.flipY ? -this.view.zoom : this.view.zoom;
+		const angle = (this.view.rotation * Math.PI) / 180;
+		const cos = Math.cos(angle);
+		const sin = Math.sin(angle);
 
-		const parseOriginComponent = (token: string | undefined, size: number, axis: 'x' | 'y'): number => {
-			const value = (token ?? '').trim().toLowerCase();
-			if (!value || value === 'center') {
-				return size / 2;
-			}
-			if (axis === 'x') {
-				if (value === 'left') {
-					return 0;
-				}
-				if (value === 'right') {
-					return size;
-				}
-			} else {
-				if (value === 'top') {
-					return 0;
-				}
-				if (value === 'bottom') {
-					return size;
-				}
-			}
-			if (value.endsWith('%')) {
-				const percent = Number.parseFloat(value);
-				return Number.isFinite(percent) ? (percent / 100) * size : size / 2;
-			}
-			const absolute = Number.parseFloat(value);
-			return Number.isFinite(absolute) ? absolute : size / 2;
+		// undo translate
+		const rx = clientX - center.x - this.view.panX;
+		const ry = clientY - center.y - this.view.panY;
+
+		// undo rotate
+		const sx = rx * cos + ry * sin;
+		const sy = -rx * sin + ry * cos;
+
+		// undo scale/flip and add back the local origin
+		return {
+			x: sx / scaleX + ox,
+			y: sy / scaleY + oy,
 		};
-
-		const originParts = style.transformOrigin.split(/\s+/);
-		const originX = parseOriginComponent(originParts[0], this.deps.canvasStack.offsetWidth, 'x');
-		const originY = parseOriginComponent(originParts[1], this.deps.canvasStack.offsetHeight, 'y');
-
-		const anchorX = stackLeft + originX;
-		const anchorY = stackTop + originY;
-		const relativeX = clientX - anchorX;
-		const relativeY = clientY - anchorY;
-		const localFromOrigin = inverse.transformPoint(new DOMPoint(relativeX, relativeY));
-		const x = localFromOrigin.x + originX;
-		const y = localFromOrigin.y + originY;
-
-		return { x, y };
 	}
 
 	getPressure(event: PointerEvent): number {
