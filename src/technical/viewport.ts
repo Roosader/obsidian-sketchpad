@@ -421,6 +421,10 @@ export class CanvasViewport {
 	}
 
 	/* touch input handling */
+	isTouchDrawActive(): boolean {
+		return !this.touchGestureActive && this.activeTouchPoints.size === 1;
+	}
+
 	tryHandleTouchPointerDown(event: PointerEvent): boolean {
 		if (event.pointerType !== 'touch') {
 			return false;

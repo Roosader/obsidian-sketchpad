@@ -76,6 +76,7 @@ export class CursorOverlay {
 	private readonly getToolSize: () => number;
 	private readonly getZoom: () => number;
 	private readonly getToolSelected: () => boolean;
+	private readonly getIsTouchDrawing: () => boolean;
 
 	private rectLeft = 0;
 	private rectTop = 0;
@@ -97,11 +98,13 @@ export class CursorOverlay {
 		getToolSize: () => number,
 		getZoom: () => number,
 		getToolSelected: () => boolean,
+		getIsTouchDrawing: () => boolean,
 	) {
 		this.getCurrentTool = getCurrentTool;
 		this.getToolSize = getToolSize;
 		this.getZoom = getZoom;
 		this.getToolSelected = getToolSelected;
+		this.getIsTouchDrawing = getIsTouchDrawing;
 
 		this.canvas = panel.createEl('canvas', { cls: 'sketchpad-cursor-overlay' });
 		this.ctx = this.canvas.getContext('2d')!;
@@ -146,12 +149,10 @@ export class CursorOverlay {
 		this.hide();
 	}
 
-	// hides the cursor for touch input
+	// records the pointer type; visibility is decided by isDrawnTool(), which
+	// shows the cursor while touch-drawing and hides it for pan/zoom/rotate
 	handlePointerDown(pointerType: string): void {
 		this.lastPointerType = pointerType;
-		if (pointerType === 'touch') {
-			this.hide();
-		}
 	}
 
 	destroy(): void {
@@ -172,7 +173,9 @@ export class CursorOverlay {
 		}
 
 		if (this.lastPointerType === 'touch') {
-			return false;
+			// only show the custom cursor while actively touch-drawing (one
+			// finger with touch-to-draw enabled); hide during touch gestures
+			return this.isMarkingTool() && this.getIsTouchDrawing();
 		}
 		// true for marking tools, or when using other tools with a pen
 		return this.isMarkingTool() || (this.lastPointerType === 'pen' && (this.lastButtons & 1) !== 0);

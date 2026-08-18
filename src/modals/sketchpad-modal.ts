@@ -452,6 +452,7 @@ export default class SketchpadView extends ItemView {
 			() => this.plugin.toolSettings[this.toolController?.getLastDrawTool() ?? 'pencil'].size,
 			() => this.viewport?.view.zoom ?? 1,
 			() => this.toolSelected,
+			() => this.viewport?.isTouchDrawActive() ?? false,
 		);
 		const cursorResizeObserver = new ResizeObserver(() => this.cursorOverlay?.resize());
 		cursorResizeObserver.observe(this.canvasPanel);
@@ -482,7 +483,11 @@ export default class SketchpadView extends ItemView {
 
 			onViewTransformChange: () => this.selectionController?.refreshOverlay(),
 
-			onMultiTouchGestureStart: (wasTap) => this.drawingController?.commitActiveStroke(wasTap),
+			onMultiTouchGestureStart: (wasTap) => {
+				// hide the custom cursor while pan/zoom/rotate is active
+				this.cursorOverlay?.handlePointerLeave();
+				this.drawingController?.commitActiveStroke(wasTap);
+			},
 
 			onTouchTap: (fingers) => {
 				if (fingers === 2) {
