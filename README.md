@@ -34,6 +34,9 @@ The layers can be reordered except for the Paper layer which always remains at t
 - **Hardness slider**
 - **Blending Mode**: Normal, Replace Alpha, Compare Density
 
+> [!IMPORTANT]
+> Enable `Windows Ink` to have pressure sensitivity on Windows devices.
+
 ## Other tools
 - **Eraser**: erase on the layer of the last active tool.
 - **Eyedropper**: select color for the last active tool.
@@ -85,6 +88,8 @@ The layers can be reordered except for the Paper layer which always remains at t
 | Zoom out                 | Mouse Wheel Down |
 | Rotate counter-clockwise | A                |
 | Rotate clockwise         | S                |
+| Decrease tool size       | D                |
+| Incrase tool size        | F                |
 | Undo                     |                  |
 | Redo                     |                  |
 | New sketch file          |                  |

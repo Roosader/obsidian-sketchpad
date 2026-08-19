@@ -73,7 +73,7 @@ export class CursorOverlay {
 	private readonly canvas: HTMLCanvasElement;
 	private readonly ctx: CanvasRenderingContext2D;
 	private readonly getCurrentTool: () => ViewTool;
-	private readonly getToolSize: () => number;
+	private readonly getToolSize: (tool: ViewTool) => number;
 	private readonly getZoom: () => number;
 	private readonly getToolSelected: () => boolean;
 	private readonly getIsTouchDrawing: () => boolean;
@@ -95,7 +95,7 @@ export class CursorOverlay {
 	constructor(
 		panel: HTMLElement,
 		getCurrentTool: () => ViewTool,
-		getToolSize: () => number,
+		getToolSize: (tool: ViewTool) => number,
 		getZoom: () => number,
 		getToolSelected: () => boolean,
 		getIsTouchDrawing: () => boolean,
@@ -181,14 +181,24 @@ export class CursorOverlay {
 		return this.isMarkingTool() || (this.lastPointerType === 'pen' && (this.lastButtons & 1) !== 0);
 	}
 
+	// true while the Wacom stylus eraser end is in contact (buttons bit 5)
+	private isStylusEraserActive(): boolean {
+		return this.lastPointerType === 'pen' && (this.lastButtons & 32) !== 0;
+	}
+
+	// the eraser is always active when using the wacom stylus eraser end
+	private effectiveTool(): ViewTool {
+		return this.isStylusEraserActive() ? 'eraser' : this.getCurrentTool();
+	}
+
 	private isMarkingTool(): boolean {
-		return DRAWN_TOOLS.has(this.getCurrentTool());
+		return DRAWN_TOOLS.has(this.effectiveTool());
 	}
 
 	private updateTipSize(): void {
 		let cssSize: number;
 		if (this.isMarkingTool()) {
-			const tipDiameterCss = this.getToolSize() * this.getZoom();
+			const tipDiameterCss = this.getToolSize(this.effectiveTool()) * this.getZoom();
 			cssSize = Math.max(
 				CURSOR_PX,
 				Math.ceil(tipDiameterCss) + 2 * TIP_PADDING_PX,
@@ -222,7 +232,7 @@ export class CursorOverlay {
 		if (marking) {
 
 			const scale = RENDER_SCALE;
-			const radius = ((this.getToolSize() * this.getZoom()) / 2) * scale;
+			const radius = ((this.getToolSize(this.effectiveTool()) * this.getZoom()) / 2) * scale;
 			const cx = this.canvas.width / 2;
 			const cy = this.canvas.height / 2;
 			const hairline = TIP_LINE_PX * scale;

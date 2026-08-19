@@ -1,4 +1,5 @@
 import { getLayerFallbackColor } from '../utilities/layer-colors';
+import { isStylusEraser } from '../utilities/utils';
 import type SketchpadPlugin from '../main';
 import type { DrawingEngine } from '../technical/drawing-engine';
 import type { CanvasViewport } from '../technical/viewport';
@@ -109,7 +110,8 @@ export class DrawingController {
 			return;
 		}
 		this.updatePressureReadout(event);
-		const tool = this.deps.tools.getCurrentTool();
+		// the Wacom stylus eraser end always erases, regardless of the selected tool
+		const tool = isStylusEraser(event) ? 'eraser' : this.deps.tools.getCurrentTool();
 		if (tool === 'eyedropper') {
 			this.deps.tools.pickColorAtPointer(event);
 			return;

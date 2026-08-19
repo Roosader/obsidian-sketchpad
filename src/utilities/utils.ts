@@ -116,3 +116,9 @@ export function blurControlFocusHandler(): (event: MouseEvent) => void {
         control?.blur();
     };
 }
+
+// true when the Wacom stylus eraser end is in contact (button 5 / buttons bit 5).
+// Only detectable while pressed; the pen tip reports button 0 / buttons bit 0.
+export function isStylusEraser(event: PointerEvent): boolean {
+    return event.pointerType === 'pen' && (event.button === 5 || (event.buttons & 32) !== 0);
+}

@@ -449,7 +449,11 @@ export default class SketchpadView extends ItemView {
 		this.cursorOverlay = new CursorOverlay(
 			this.canvasPanel,
 			() => this.toolController?.getCurrentTool() ?? 'pencil',
-			() => this.plugin.toolSettings[this.toolController?.getLastDrawTool() ?? 'pencil'].size,
+			(tool) => {
+				// the eraser end uses the eraser's own size
+				const name = tool === 'eraser' ? 'eraser' : (this.toolController?.getLastDrawTool() ?? 'pencil');
+				return this.plugin.toolSettings[name].size;
+			},
 			() => this.viewport?.view.zoom ?? 1,
 			() => this.toolSelected,
 			() => this.viewport?.isTouchDrawActive() ?? false,
