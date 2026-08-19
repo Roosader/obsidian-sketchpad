@@ -5,14 +5,14 @@ import { GpuStrokeEngine } from '../technical/gpu-stroke-engine';
 import type { DrawingEngine } from '../technical/drawing-engine';
 import { getGpuContext, isGpuSupported } from '../rendering/gpu-context';
 import { buildToolbar, type ToolbarElements } from '../ui/top-toolbar';
-import { buildToolSettingsSidebar, type ToolSettingsSidebarElements } from '../ui/right-sidebar';
+import { buildToolSettingsSidebar, sizeToSlider, sliderToSize, type ToolSettingsSidebarElements } from '../ui/right-sidebar';
 import { buildLayerSidebar, buildViewControls, syncLayerSidebar, type LayerControls, type ViewControlElements } from '../ui/left-sidebar';
 import { createSelectionOverlay, resizeSelectionOverlay, type GizmoScreenContext } from '../ui/selection-overlay';
 import { createGridOverlay, drawGrid, clearGrid } from '../ui/grid-overlay';
 import { CursorOverlay } from '../ui/cursor-overlay';
 import type SketchpadPlugin from '../main';
 import type { LayerName, OraDocument, ViewTool } from '../utilities/types';
-import { DEFAULT_FILE_NAME } from '../utilities/constants';
+import { DEFAULT_FILE_NAME, TOOL_TIP_MAX_SIZE } from '../utilities/constants';
 import { sampleDataUrlColor } from '../utilities/layer-colors';
 import { blurControlFocusHandler } from '../utilities/utils';
 import { parseOraArchive } from '../ora/ora-parser';
@@ -600,6 +600,7 @@ export default class SketchpadView extends ItemView {
 			setTool: (tool) => this.toolController?.setTool(tool),
 			hasActiveSelection: () => this.selectionController?.selectionActive ?? false,
 			cancelSelection: () => this.selectionController?.cancelSelection(),
+			adjustToolSize: (delta) => this.adjustToolSize(delta),
 		});
 
 		this.drawingController = new DrawingController({
@@ -885,6 +886,26 @@ export default class SketchpadView extends ItemView {
 	private switchTool(tool: ViewTool): void {
 		this.hotkeyController?.clearTempToolHold();
 		this.toolController?.setTool(tool);
+	}
+
+	// grows/shrinks the current draw tool's tip size by a perceptual slider step
+	private adjustToolSize(delta: number): void {
+		const tool = this.toolController?.getLastDrawTool() ?? 'pencil';
+		const settings = this.plugin.toolSettings[tool];
+		const slider = sizeToSlider(settings.size) + delta;
+		const clamped = Math.max(0, Math.min(100, slider));
+		let next = sliderToSize(clamped);
+		// Rounding in the quadratic slider can collapse a small step back to the
+		// same pixel size at the extremes (e.g. 1px -> 1px when increasing), which
+		// makes the hotkey feel stuck. Guarantee at least a 1px change in the
+		// intended direction so it always responds.
+		if (next === settings.size) {
+			next = Math.max(1, Math.min(TOOL_TIP_MAX_SIZE, settings.size + Math.sign(delta)));
+		}
+		settings.size = next;
+		this.cursorOverlay?.refresh();
+		this.toolController?.refreshToolSettingsUI();
+		void this.plugin.saveToolSettings();
 	}
 
 	// marks the open file as changed since its last save/open

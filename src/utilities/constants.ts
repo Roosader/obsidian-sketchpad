@@ -1,4 +1,4 @@
-import type { LayerName, ViewTool, RotateAction } from './types';
+import type { LayerName, ViewTool, RotateAction, SizeAction } from './types';
 
 export const DEFAULT_FILE_NAME = 'Untitled sketch';
 
@@ -79,6 +79,14 @@ export const DEFAULT_ROTATE_HOTKEYS: Partial<Record<RotateAction, string>> = {
 	'rotate-ccw': 'a',
 	'rotate-cw': 's',
 };
+
+export const DEFAULT_SIZE_HOTKEYS: Partial<Record<SizeAction, string>> = {
+	'size-increase': 'f',
+	'size-decrease': 'd',
+};
+
+// size step per press, in perceptual slider units (0-100)
+export const SIZE_STEP = 5;
 
 export const DEFAULT_ROTATE_SENSITIVITY = 3; // degrees per press
 export const MIN_ROTATE_SENSITIVITY = 1;

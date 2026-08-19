@@ -1,6 +1,6 @@
 import { PluginSettingTab, Setting, setIcon } from 'obsidian';
 import SketchpadPlugin from '../main';
-import type { LayerName, ViewTool, RotateAction } from './types';
+import type { LayerName, ViewTool, RotateAction, SizeAction } from './types';
 import { MODIFIER_HOTKEY_KEYS, MIN_ROTATE_SENSITIVITY, MAX_ROTATE_SENSITIVITY, DEFAULT_FILE_NAME, DEFAULT_IMAGE_WIDTH, DEFAULT_IMAGE_HEIGHT, MAX_IMAGE_DIMENSION, MAX_GRID_SIZE, AUTOSAVE_INTERVAL_OPTIONS } from './constants';
 import {normalizeHotkeyKey} from './utils';
 
@@ -32,6 +32,13 @@ const ROTATE_HOTKEY_ACTIONS: RotateAction[] = ['rotate-ccw', 'rotate-cw'];
 const ROTATE_HOTKEY_LABELS: Partial<Record<RotateAction, string>> = {
 	'rotate-ccw': 'Rotate counter-clockwise',
 	'rotate-cw': 'Rotate clockwise',
+};
+
+const SIZE_HOTKEY_ACTIONS: SizeAction[] = ['size-increase', 'size-decrease'];
+
+const SIZE_HOTKEY_LABELS: Partial<Record<SizeAction, string>> = {
+	'size-increase': 'Increase tool tip size',
+	'size-decrease': 'Decrease tool tip size',
 };
 
 function displayHotkey(key: string): string {
@@ -286,6 +293,14 @@ export class SketchpadSettingTab extends PluginSettingTab
                     await this.plugin.saveToolSettings();
                 });
         });
+
+        new Setting(containerEl)
+            .setName('Tool tip size hotkeys')
+            .setHeading();
+
+        for (const action of SIZE_HOTKEY_ACTIONS) {
+            this.addSizeHotkeySetting(containerEl, action);
+        }
     }
 
     private addDefaultLayerOrderSetting(containerEl: HTMLElement): void {
@@ -356,6 +371,16 @@ export class SketchpadSettingTab extends PluginSettingTab
             () => this.plugin.rotateHotkeys[action],
             (key) => { this.plugin.rotateHotkeys[action] = key; },
             () => { delete this.plugin.rotateHotkeys[action]; },
+        );
+    }
+
+    private addSizeHotkeySetting(containerEl: HTMLElement, action: SizeAction): void {
+        this.addHotkeySetting(
+            containerEl,
+            SIZE_HOTKEY_LABELS[action] ?? action,
+            () => this.plugin.sizeHotkeys[action],
+            (key) => { this.plugin.sizeHotkeys[action] = key; },
+            () => { delete this.plugin.sizeHotkeys[action]; },
         );
     }
 
@@ -436,6 +461,11 @@ export class SketchpadSettingTab extends PluginSettingTab
         for (const action of ROTATE_HOTKEY_ACTIONS) {
             if (this.plugin.rotateHotkeys[action] === key) {
                 delete this.plugin.rotateHotkeys[action];
+            }
+        }
+        for (const action of SIZE_HOTKEY_ACTIONS) {
+            if (this.plugin.sizeHotkeys[action] === key) {
+                delete this.plugin.sizeHotkeys[action];
             }
         }
         commit(key);

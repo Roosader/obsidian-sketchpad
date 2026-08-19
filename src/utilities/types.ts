@@ -3,6 +3,7 @@ import type { PressureCurve } from '../technical/pressure-curve';
 export type ToolName = 'pencil' | 'pen' | 'brush' | 'eraser';
 export type ViewTool = ToolName | 'eyedropper' | 'hand' | 'lasso' | 'zoom-in' | 'zoom-out' | 'rotate';
 export type RotateAction = 'rotate-ccw' | 'rotate-cw';
+export type SizeAction = 'size-increase' | 'size-decrease';
 export type LayerName = 'Paper' | 'Sketch' | 'Ink' | 'Paint';
 export type BlendMode = 'normal' | 'multiply';
 export type ToolBlendMode = 'normal' | 'replace-alpha' | 'compare-density';
