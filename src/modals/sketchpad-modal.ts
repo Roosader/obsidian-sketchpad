@@ -862,10 +862,18 @@ export default class SketchpadView extends ItemView {
 		}
 		const shellWidth = this.sketchpadShell.offsetWidth;
 		const shellHeight = this.sketchpadShell.offsetHeight;
+		const MARGIN = 10; 
 		const apply = (sidebar: HTMLElement, pos: { x: number; y: number } | null, anchor: 'left' | 'right'): void => {
 			if (!pos) {
 				return;
 			}
+			// constrain height: available = shell height − top position − bottom margin
+			const availableHeight = Math.max(0, shellHeight - pos.y - MARGIN);
+			sidebar.style.setProperty('max-height', `${availableHeight}px`);
+			// constrain width: available = shell width − margin − distance from anchored edge
+			const availableWidth = Math.max(0, shellWidth - MARGIN - pos.x);
+			sidebar.style.setProperty('max-width', `${availableWidth}px`);
+			// clamp position (uses updated offsetWidth/Height after max-width/max-height applied)
 			const maxX = Math.max(0, shellWidth - sidebar.offsetWidth);
 			const maxY = Math.max(0, shellHeight - sidebar.offsetHeight);
 			const x = Math.min(Math.max(0, pos.x), maxX);
@@ -884,6 +892,8 @@ export default class SketchpadView extends ItemView {
 			sidebar.style.removeProperty('left');
 			sidebar.style.removeProperty('right');
 			sidebar.style.removeProperty('top');
+			sidebar.style.removeProperty('max-width');
+			sidebar.style.removeProperty('max-height');
 		}
 	}
 

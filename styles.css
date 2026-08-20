@@ -920,6 +920,9 @@ input[type='range'].sketchpad-okhsl-slider::-webkit-slider-thumb {
 	position: absolute;
 	left: 0;
 	height: auto;
+	max-height: calc(100% - 20px);
+	max-width: 100%;
+	overflow: auto;
 	background: var(--background-primary);
 
 	border-radius: var(--radius-m);
@@ -930,7 +933,10 @@ input[type='range'].sketchpad-okhsl-slider::-webkit-slider-thumb {
 .sketchpad-minimal.sketchpad-right-sidebar {
 	position: absolute;
 	right: 0;
-	height: auto; 
+	height: auto;
+	max-height: calc(100% - 20px);
+	max-width: 100%;
+	overflow: auto;
 	background: var(--background-primary);
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
@@ -939,7 +945,7 @@ input[type='range'].sketchpad-okhsl-slider::-webkit-slider-thumb {
 }
 .sketchpad-minimal .sketchpad-view-controls,
 .sketchpad-minimal .sketchpad-vertical-toolbar {
-	height: 420px;
+	max-height: 420px;
 	width: 30px;
 	max-width: 30px;
 	border: 0;
