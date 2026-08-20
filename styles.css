@@ -375,8 +375,8 @@ button.sketchpad-panel-move-button:active {
 	display: flex;
 	align-items: center;
 }
-button.sketchpad-layer-visibility-button,
-button.sketchpad-layer-move-button {
+.sketchpad-layer-controls button.sketchpad-layer-visibility-button,
+.sketchpad-layer-controls button.sketchpad-layer-move-button {
 	padding: 0;
 	background-color: transparent;
 	box-shadow: none;
@@ -766,6 +766,10 @@ input[type='range'].sketchpad-okhsl-slider::-webkit-slider-thumb {
 }
 .sketchpad-new-file-row label {
 	text-wrap: nowrap;
+}
+.sketchpad-new-file-row input[type='number']{
+	min-width: 60px;
+	max-width: 100px;
 }
 .sketchpad-new-file-row input[type='color'].sketchpad-paper-color-picker {
 	margin-left: 0;
