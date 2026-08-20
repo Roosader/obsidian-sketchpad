@@ -238,6 +238,7 @@ input[type='range'].sketchpad-vertical-slider {
 	writing-mode: vertical-lr;
 	direction: rtl;
 	align-self: center;
+	min-height: 60px;
 	height: 100%;
 	width: 20px;
 }
@@ -304,10 +305,12 @@ button.sketchpad-panel-move-button:active {
 .sketchpad-left-sidebar {
 	background: var(--background-primary);
 	border-right: 1px solid var(--background-modifier-border);
-	overflow: hidden;
+	overflow: auto;
 	display: flex;
 	flex-direction: row;
 	flex-shrink: 0;
+	height: 100%;
+	min-height: 0;
 	z-index: 8;
 	touch-action: none;
 }
@@ -317,7 +320,8 @@ button.sketchpad-panel-move-button:active {
 
 .sketchpad-layer-controls {
 	border-right: 1px solid var(--background-modifier-border);
-	flex-shrink: 0;
+	flex: 1;
+	min-height: 0;
 	overflow-y: auto;
 	overflow-x: hidden;
 	width: 200px;
@@ -471,11 +475,13 @@ input[type='color'].sketchpad-paper-color-picker::-webkit-color-swatch {
 .sketchpad-vertical-toolbar,
 .sketchpad-view-controls{
 	overflow-x:hidden;
-	flex-shrink: 0;
+	flex: 1;
+	min-height: 0;
 	display: flex;
 	flex-direction: column;
 	overflow-y: auto;
 	width: 50px;
+	max-width: 50px;
 	gap: 5px;
 	align-items: center;
 	padding: 5px 0;
@@ -513,10 +519,12 @@ body.is-mobile .sketchpad-view-controls-button {
 {	
 	background: var(--background-primary);
 	border-left: 1px solid var(--background-modifier-border);
-	overflow: hidden;
+	overflow: auto;
 	display: flex;
 	flex-direction: row;
 	flex-shrink: 0;
+	height: 100%;
+	min-height: 0;
 	z-index: 8;
 	touch-action: none;
 }
@@ -527,7 +535,8 @@ body.is-mobile .sketchpad-view-controls-button {
 .sketchpad-tool-settings {
 	border-left: 1px solid var(--background-modifier-border);
 	width: 200px;
-	flex-shrink: 0;
+	flex: 1;
+	min-height: 0;
 	overflow-y: auto;
 	overflow-x: hidden;
 	display: flex;
@@ -563,7 +572,8 @@ body.is-mobile .sketchpad-view-controls-button {
 .sketchpad-okhsl-color-picker { 
 	border-left: 1px solid var(--background-modifier-border);
 	width: 200px;
-	flex-shrink: 0;
+	flex: 1;
+	min-height: 0;
 	overflow-y: auto;
 	overflow-x: hidden;
 	display: flex;
@@ -906,7 +916,7 @@ input[type='range'].sketchpad-okhsl-slider::-webkit-slider-thumb {
 }
 
 /* Minimal UI adjustments */
-.sketchpad-left-sidebar.sketchpad-minimal {
+.sketchpad-minimal.sketchpad-left-sidebar {
 	position: absolute;
 	left: 0;
 	height: auto;
@@ -917,7 +927,7 @@ input[type='range'].sketchpad-okhsl-slider::-webkit-slider-thumb {
 	margin-top: 10px;
 	margin-left: 10px;
 }
-.sketchpad-right-sidebar.sketchpad-minimal {
+.sketchpad-minimal.sketchpad-right-sidebar {
 	position: absolute;
 	right: 0;
 	height: auto; 
@@ -931,6 +941,7 @@ input[type='range'].sketchpad-okhsl-slider::-webkit-slider-thumb {
 .sketchpad-minimal .sketchpad-vertical-toolbar {
 	height: 420px;
 	width: 30px;
+	max-width: 30px;
 	border: 0;
 	gap: 5px;
 }
@@ -980,10 +991,10 @@ input[type='range'].sketchpad-okhsl-slider::-webkit-slider-thumb {
 body.is-mobile .sketchpad-view-controls-button {
 	padding: 0;
 }
-body.is-mobile .sketchpad-vertical-toolbar,
+/* body.is-mobile .sketchpad-vertical-toolbar,
 body.is-mobile .sketchpad-view-controls {
 	height: 500px;
-}
+} */
 body.is-mobile .sketchpad-tool {
 	height: 30px;
 }

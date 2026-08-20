@@ -100,7 +100,7 @@ export default class SketchpadView extends ItemView {
 
 		const newFileButton = this.headerEl.createEl('button', { text: 'New...' });
 		newFileButton.addClass('sketchpad-header-button');
-		this.headerEl.insertBefore(newFileButton, this.headerEl.firstChild);
+		this.headerEl.insertAfter(newFileButton, this.headerEl.firstChild);
 		this.registerDomEvent(newFileButton, 'click', () => {
 			void this.createNewSketchDocument();
 		});
