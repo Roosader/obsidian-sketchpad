@@ -111,7 +111,7 @@ export function blurControlFocusHandler(): (event: MouseEvent) => void {
     return (event: MouseEvent) => {
         const target = event.target as HTMLElement | null;
         const control = target?.closest<HTMLElement>(
-            'button, input[type="range"], input[type="checkbox"], input[type="radio"], input[type="color"], select',
+            'button, input[type="range"], input[type="checkbox"], input[type="radio"], input[type="color"]',
         );
         control?.blur();
     };
