@@ -100,7 +100,8 @@ button.sketchpad-tool {
 	height: 22px;
 }
 .sketchpad-tool.layer-active {
-	--box-shadow-complementary: oklch(from var(--interactive-accent) calc(l - 0.2) calc(c + 0.1) calc(h + 20));
+	--accent-primary-mix: color-mix(in srgb, var(--background-primary) 30%, var(--interactive-accent) 70%);
+	--box-shadow-complementary: oklch(from var(--accent-primary-mix) l calc(c + 0.1) calc(h + 180));
 	box-shadow: 0 0 0 3px var(--box-shadow-complementary);
 }
 .sketchpad-tool.active {
