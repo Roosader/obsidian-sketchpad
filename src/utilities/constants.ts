@@ -30,7 +30,7 @@ export const SMALL_CIRCLE_CURSOR = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg
 
 export const PRESSURE_POINT_SIZE = 10; 
 
-export const MAX_UNDO_COUNT = 25;
+export const MAX_UNDO_COUNT = 50;
 
 export const toolCursorClasses = [
 	'sketchpad-pencil-active',
