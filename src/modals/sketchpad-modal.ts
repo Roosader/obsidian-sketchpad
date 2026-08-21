@@ -225,6 +225,7 @@ export default class SketchpadView extends ItemView {
 		this.headerTitleEl.setText('Sketchpad');
 		this.viewport.resetView();
 		this.canvas.addClass('sketchpad-canvas-hidden');
+		this.toolController?.syncToolbarLayerVisibility();
 		this.updateNoFileUI();
 	}
 
@@ -590,6 +591,7 @@ export default class SketchpadView extends ItemView {
 			getToolSettingsSidebar: () => this.toolSettingsSidebar,
 			commitSelection: () => this.selectionController?.commitSelection(),
 			syncLayerSidebar: () => this.syncLayerSidebarActive(),
+			hasOpenFile: () => this.hasOpenFile,
 			onToolChange: () => {
 				this.toolSelected = true;
 				this.updateToolSettingsUI();
@@ -688,6 +690,7 @@ export default class SketchpadView extends ItemView {
 		this.registerDomEvent(window, 'keyup', this.hotkeyController.handleKeyUp);
 		this.registerDomEvent(this.canvasPanel, 'wheel', this.viewport.handleWheel, { passive: false });
 
+		this.toolController?.syncToolbarLayerVisibility();
 		this.updateToolSettingsUI();
 		this.updateNoFileUI();
 		this.cursorOverlay?.refresh();

@@ -1,5 +1,5 @@
 import { Notice } from 'obsidian';
-import { syncToolbarToTool, syncToolbarToLayerVisibility, type ToolbarElements } from '../ui/top-toolbar';
+import { syncToolbarToTool, syncToolbarToLayerVisibility, syncToolbarToActiveLayer, type ToolbarElements } from '../ui/top-toolbar';
 import { syncToolSettingsSidebar, type ToolSettingsSidebarElements } from '../ui/right-sidebar';
 import type SketchpadPlugin from '../main';
 import type { LayerName, OraLayer, ToolName, ViewTool } from '../utilities/types';
@@ -17,6 +17,9 @@ export interface ToolControllerDeps {
 	commitSelection: () => void;
 
 	syncLayerSidebar: () => void;
+
+	// when false (no file open), no tool button carries the layer-active highlight
+	hasOpenFile?: () => boolean;
 
 	onToolChange?: () => void;
 }
@@ -146,6 +149,7 @@ export class ToolController {
 		if (!toolbar) {
 			return;
 		}
+		syncToolbarToActiveLayer(toolbar, this.deps.hasOpenFile?.() === false ? null : this.activeLayer);
 		const visibilityMap = this.getDrawingToolVisibilityMap();
 		syncToolbarToLayerVisibility(toolbar, visibilityMap);
 

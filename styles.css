@@ -99,10 +99,15 @@ button.sketchpad-tool {
 	width: 22px;
 	height: 22px;
 }
+.sketchpad-tool.layer-active {
+	--box-shadow-complementary: oklch(from var(--interactive-accent) calc(l - 0.2) calc(c + 0.1) calc(h + 20));
+	box-shadow: 0 0 0 3px var(--box-shadow-complementary);
+}
 .sketchpad-tool.active {
 	background-color: var(--interactive-accent);
 	color: var(--text-on-accent);
 }
+
 .sketchpad-tool:disabled {
 	opacity: 0.4;
 	cursor: not-allowed;
@@ -277,6 +282,7 @@ button.sketchpad-expand-collapse-button {
 	background-color:transparent;
 	box-shadow: none;
 	touch-action: none;
+	cursor: pointer;
 }
 button.sketchpad-expand-collapse-button.is-active{
 	color: var(--interactive-accent);
@@ -642,6 +648,12 @@ input[type='range'].sketchpad-okhsl-slider::-webkit-slider-thumb {
 	height: 22px;
 	background-color: var(--text-muted);
 	border: 1px solid var(--background-primary);
+}
+input[type='range'].sketchpad-okhsl-slider:active::-webkit-slider-thumb,
+input[type='range'].sketchpad-okhsl-slider:focus::-webkit-slider-thumb {
+    width: 32px;
+    height: 22px;
+	top: 0;
 }
 
 /* Pressure Curve styles */

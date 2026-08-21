@@ -1,5 +1,5 @@
 import { setIcon } from 'obsidian';
-import type { ToolName, ViewTool } from '../utilities/types';
+import type { LayerName, ToolName, ViewTool } from '../utilities/types';
 
 export interface ToolbarElements {
 	toolButtons: HTMLButtonElement[];
@@ -97,6 +97,21 @@ export function buildToolbar(
 export function syncToolbarToTool(elements: ToolbarElements, activeTool: ViewTool): void {
 	for (const button of elements.toolButtons) {
 		button.classList.toggle('active', button.dataset.tool === activeTool);
+	}
+}
+
+// Highlights the button whose tool targets the active layer,
+// independent of whichever tool is currently selected.
+// Pass null (no open file) to clear the highlight from every button.
+export function syncToolbarToActiveLayer(elements: ToolbarElements, activeLayer: LayerName | null): void {
+	const layerTools: Partial<Record<LayerName, ToolName>> = {
+		Sketch: 'pencil',
+		Ink: 'pen',
+		Paint: 'brush',
+	};
+	const layerTool = activeLayer === null ? undefined : layerTools[activeLayer];
+	for (const button of elements.toolButtons) {
+		button.classList.toggle('layer-active', layerTool !== undefined && button.dataset.tool === layerTool);
 	}
 }
 
