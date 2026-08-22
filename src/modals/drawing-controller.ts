@@ -46,6 +46,12 @@ export class DrawingController {
 
 	private readonly predictor = new PointerPredictor();
 
+	// pointer prediction offset (client-space px) from the most recent
+	// predict + append cycle, forwarded to the cursor overlay so the custom
+	// tool cursor stays aligned with the predicted ink tip
+	private cursorPredictionDx = 0;
+	private cursorPredictionDy = 0;
+
 	constructor(private readonly deps: DrawingControllerDeps) {}
 
 	// handles pointer events that start from outside image
@@ -153,6 +159,8 @@ export class DrawingController {
 		this.activeDrawTool = tool;
 		this.rawSamplesSeen = false;
 		this.predictor.reset();
+		this.cursorPredictionDx = 0;
+		this.cursorPredictionDy = 0;
 		this.deps.tools.updateActiveLayer(tool);
 		const layer = this.deps.tools.getTargetLayer(tool);
 		const settings = this.deps.plugin.toolSettings[tool];
@@ -237,6 +245,9 @@ export class DrawingController {
 		this.deps.canvas.releasePointerCapture(event.pointerId);
 		this.deps.refreshUndoRedoUI();
 		this.deps.render();
+		// prediction offset should not persist after the stroke ends
+		this.cursorPredictionDx = 0;
+		this.cursorPredictionDy = 0;
 	};
 
 	// called when a second finger lands during one-finger touch drawing
@@ -336,15 +347,44 @@ export class DrawingController {
 	// the stroke tip renders slightly ahead of the latest real sample, hiding
 	// residual input lag. Predicted points are rolled back by the engine before
 	// later real samples arrive and never commit to the stroke.
+	// Also computes the prediction offset for the cursor overlay so the custom
+	// tool cursor stays aligned with the predicted ink tip.
 	private appendPredictedTail(): void {
 		if (!this.deps.plugin.pointerPredictionEnabled) {
+			this.cursorPredictionDx = 0;
+			this.cursorPredictionDy = 0;
 			return;
 		}
 		const points = this.predictor.predict();
 		if (points.length === 0) {
+			this.cursorPredictionDx = 0;
+			this.cursorPredictionDy = 0;
 			return;
 		}
 		this.deps.engine.appendPredictedTail(points);
+
+		// Convert the doc-space delta of the furthest predicted point to
+		// client-space px so the cursor overlay can apply the same offset.
+		const last = this.predictor.lastSample();
+		if (!last) {
+			return;
+		}
+		const pred = points[points.length - 1]!;
+		const docDx = pred.x - last.x;
+		const docDy = pred.y - last.y;
+		const v = this.deps.viewport.view;
+		const scaleX = v.flipX ? -v.zoom : v.zoom;
+		const scaleY = v.flipY ? -v.zoom : v.zoom;
+		const angle = (v.rotation * Math.PI) / 180;
+		const cos = Math.cos(angle);
+		const sin = Math.sin(angle);
+		this.cursorPredictionDx = docDx * scaleX * cos - docDy * scaleY * sin;
+		this.cursorPredictionDy = docDx * scaleX * sin + docDy * scaleY * cos;
+	}
+
+	/** Return the latest prediction offset (client-space px) for the cursor overlay. */
+	getCursorPredictionOffset(): { dx: number; dy: number } {
+		return { dx: this.cursorPredictionDx, dy: this.cursorPredictionDy };
 	}
 
 	private drawLivePreview(tool: ToolName): void {

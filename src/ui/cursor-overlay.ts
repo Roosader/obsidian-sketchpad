@@ -89,6 +89,9 @@ export class CursorOverlay {
 
 	private cssSize = -1; // current canvas display size (CSS px)
 
+	private predictionOffsetX = 0; // pointer-prediction offset (client px), applied on top of lastClientX/Y
+	private predictionOffsetY = 0;
+
 	private iconBitmap: HTMLCanvasElement | null = null; //cursor for marking tools
 	private circleBitmap: HTMLCanvasElement | null = null; //cursor for non-marking tools on pen input
 
@@ -128,6 +131,12 @@ export class CursorOverlay {
 		this.refresh();
 	}
 
+	/** Set an additional offset (client-space px) from pointer prediction. */
+	setPredictionOffset(dx: number, dy: number): void {
+		this.predictionOffsetX = dx;
+		this.predictionOffsetY = dy;
+	}
+
 	// moves the cursor canvas to the latest pointer position 
 	handlePointerMove(clientX: number, clientY: number, pointerType: string, buttons: number): void {
 		this.lastClientX = clientX;
@@ -146,6 +155,8 @@ export class CursorOverlay {
 
 	handlePointerLeave(): void {
 		this.hasPosition = false;
+		this.predictionOffsetX = 0;
+		this.predictionOffsetY = 0;
 		this.hide();
 	}
 
@@ -269,8 +280,8 @@ export class CursorOverlay {
 
 	private place(): void {
 		// round to whole pixels to prevent aliasing
-		const x = Math.round(this.lastClientX - this.rectLeft - this.cssSize / 2);
-		const y = Math.round(this.lastClientY - this.rectTop - this.cssSize / 2);
+		const x = Math.round(this.lastClientX + this.predictionOffsetX - this.rectLeft - this.cssSize / 2);
+		const y = Math.round(this.lastClientY + this.predictionOffsetY - this.rectTop - this.cssSize / 2);
 		this.canvas.style.transform = `translate3d(${x}px, ${y}px, 0)`;
 	}
 

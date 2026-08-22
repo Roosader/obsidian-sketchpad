@@ -112,6 +112,15 @@ export class PointerPredictor {
 		return points;
 	}
 
+	/** Return the most recent real sample fed to the predictor, or undefined. */
+	lastSample(): Point | undefined {
+		if (this.samples.length === 0) {
+			return undefined;
+		}
+		const s = this.samples[this.samples.length - 1]!;
+		return { x: s.x, y: s.y, pressure: this.lastPressure };
+	}
+
 	/** Clear the sample buffer for a new stroke. */
 	reset(): void {
 		this.samples.length = 0;

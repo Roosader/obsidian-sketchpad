@@ -670,6 +670,15 @@ export default class SketchpadView extends ItemView {
 				// feed the active stroke at native device rate, ahead of the
 				// rAF-aligned pointermove dispatch
 				this.drawingController?.handleRawPointerUpdate(pe);
+				// after the prediction engine has computed its offset, forward
+				// it to the cursor overlay so the tool cursor stays aligned
+				// with the predicted ink tip
+				const off = this.drawingController?.getCursorPredictionOffset();
+				if (off && (off.dx !== 0 || off.dy !== 0)) {
+					this.cursorOverlay?.setPredictionOffset(off.dx, off.dy);
+				} else if (off) {
+					this.cursorOverlay?.setPredictionOffset(0, 0);
+				}
 			};
 			this.canvasPanel.addEventListener('pointerrawupdate', onPanelRawUpdate, { passive: true });
 			this.register(() => {
