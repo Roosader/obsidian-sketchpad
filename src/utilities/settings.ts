@@ -74,7 +74,11 @@ export class SketchpadSettingTab extends PluginSettingTab
 
         new Setting(containerEl)
             .setName('Enable touch to draw')
-            .setDesc('When enabled, draw with one finger. Two fingers always pan, pinch to zoom, and twist to rotate. Two-finger tap to undo. Three-finger tap to redo. When disabled, one finger pans instead.')
+            .setDesc(createFragment((frag) => {
+                frag.appendText('If disabled, one finger pans the canvas. Two fingers also pan, pinch to zoom, and twist to rotate. Two-finger tap to undo. Three-finger tap to redo.');
+                frag.createEl('br');
+                frag.appendText('When enabled, one finger will draw instead of panning the canvas. All other touch controls remain the same.');
+            }))
             .addToggle((toggle) => {
                 toggle
                     .setValue(this.plugin.touchToDrawEnabled)

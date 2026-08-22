@@ -55,11 +55,15 @@ The layers can be reordered except for the Paper layer which always remains at t
     - Each layer is a png image that can be accessed by simply unzipping the `.ora` file.
 - Supports undo/redo upto 50 counts.
 - Supports autosave from 5-30 minutes interval.
-- Supports touch controls (disabled by default).
-    - Two-finger pinch to rotate and zoom.
-    - One finger touch to pan.
+- Supports touch controls.
+    - One-finger touch to pan.
+    - Two-finger pinch to rotate, zoom, and pan.
     - Two-finger tap to undo.
     - Three-finger tap to redo.
+
+> [!IMPORTANT]
+> Enabling `Touch to draw` in the settings will make the one-finger gesture draw instead of panning the canvas. All other touch gestures remain the same.
+
 - Export any sketch file as a png image.
 - Embed sketch files in notes with Wikilinks.
 - Set custom keyboard shortcuts for tools and actions in Obsidian's hotkeys settings and the plugin's settings page.
@@ -89,7 +93,7 @@ The layers can be reordered except for the Paper layer which always remains at t
 | Rotate counter-clockwise | A                |
 | Rotate clockwise         | S                |
 | Decrease tool size       | D                |
-| Incrase tool size        | F                |
+| Increase tool size       | F                |
 | Undo                     |                  |
 | Redo                     |                  |
 | New sketch file          |                  |
