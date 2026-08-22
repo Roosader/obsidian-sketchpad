@@ -101,6 +101,22 @@ export class SketchpadSettingTab extends PluginSettingTab
             });
 
         new Setting(containerEl)
+            .setName('Enable pointer prediction')
+            .setDesc(createFragment((frag) => {
+                frag.appendText('Extends the live stroke tip slightly ahead using the browser\'s predicted pointer positions, hiding input lag while drawing. Predicted points are never saved into the stroke.');
+                frag.createEl('br');
+                frag.appendText('Disable if the stroke tip feels unstable or overshoots on quick movements.');
+            }))
+            .addToggle((toggle) => {
+                toggle
+                    .setValue(this.plugin.pointerPredictionEnabled)
+                    .onChange(async (value) => {
+                        this.plugin.pointerPredictionEnabled = value;
+                        await this.plugin.saveToolSettings();
+                    });
+            });
+
+        new Setting(containerEl)
             .setName('Reset sidebar positions')
             .addButton((button) => {
                 button

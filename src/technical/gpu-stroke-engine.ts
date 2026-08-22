@@ -3,6 +3,7 @@ import {
 	MASK_TEXTURE_FORMAT,
 	clearTexture,
 	copyTexture,
+	copyTextureRegion,
 	createLayerTexture,
 	destroyTexture,
 	fillSolidColor,
@@ -85,6 +86,13 @@ export class GpuStrokeEngine implements DrawingEngine {
 	private lastRenderedPoint = 0;
 	private strokeBounds: Bounds = { ...EMPTY_BOUNDS };
 	private dirtyBounds: Bounds = { ...EMPTY_BOUNDS };
+	// pointer prediction: trailing points appended from the browser's
+	// getPredictedEvents() that render into the live preview but are rolled
+	// back before the stroke commits. The backup texture snapshots the mask
+	// region the predicted stamps touch so they can be erased again.
+	private predictedBackupTex!: GpuTexture;
+	private predictedBackupRect: ScissorRect | null = null;
+	private predictedCount = 0;
 	private rgbColor = { r: 0, g: 0, b: 0 };
 	private lastStackResult!: GpuTexture;
 	// persistent full-canvas framebuffer holding the last composited frame, so
@@ -156,6 +164,88 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.currentStroke?.points.push(point);
 	}
 
+	// appends browser-predicted points that extend the live preview ahead of
+	// the latest real sample. Snapshots the mask region their stamps will touch
+	// so the whole tail can be rolled back once real samples catch up.
+	appendPredictedTail(points: Point[]): void {
+		if (this.destroyed || !this.currentStroke || points.length === 0) {
+			return;
+		}
+		// bake pending real samples first so the backup captures the stroke up
+		// to the last real point - restoring it later must preserve those stamps.
+		// Save dirty bounds first: rollbackPredictedTail may have marked the old
+		// predicted region dirty, and updateStrokeTextures() resets dirtyBounds
+		// internally. Merge those back so drawPreview can rebuild the region.
+		const savedDirty = { ...this.dirtyBounds };
+		this.updateStrokeTextures();
+		if (savedDirty.left !== Infinity) {
+			this.dirtyBounds.left = Math.min(this.dirtyBounds.left, savedDirty.left);
+			this.dirtyBounds.top = Math.min(this.dirtyBounds.top, savedDirty.top);
+			this.dirtyBounds.right = Math.max(this.dirtyBounds.right, savedDirty.right);
+			this.dirtyBounds.bottom = Math.max(this.dirtyBounds.bottom, savedDirty.bottom);
+		}
+
+		const strokePoints = this.currentStroke.points;
+		const anchor = strokePoints[strokePoints.length - 1];
+		if (!anchor) {
+			return;
+		}
+
+		// predicted stamps lie on segments from the anchor through the predicted
+		// points; expand by a couple of stamp diameters so the snapshot covers
+		// every stamp the tail can produce
+		const margin = this.currentStroke.size * 2;
+		let left = anchor.x;
+		let top = anchor.y;
+		let right = anchor.x;
+		let bottom = anchor.y;
+		for (const point of points) {
+			left = Math.min(left, point.x);
+			top = Math.min(top, point.y);
+			right = Math.max(right, point.x);
+			bottom = Math.max(bottom, point.y);
+		}
+		const x = Math.max(0, Math.floor(left - margin));
+		const y = Math.max(0, Math.floor(top - margin));
+		const width = Math.min(this.width, Math.ceil(right + margin)) - x;
+		const height = Math.min(this.height, Math.ceil(bottom + margin)) - y;
+		if (width <= 0 || height <= 0) {
+			return;
+		}
+
+		copyTextureRegion(this.gl, this.maskTex, this.predictedBackupTex, x, y, x, y, width, height);
+		this.predictedBackupRect = { x, y, width, height };
+		for (const point of points) {
+			strokePoints.push(point);
+		}
+		this.predictedCount = points.length;
+	}
+
+	// removes predicted points and restores the mask + composited-preview
+	// regions they stamped, so the next preview pass shows real samples only
+	rollbackPredictedTail(): void {
+		if (!this.currentStroke || this.predictedCount === 0) {
+			return;
+		}
+		const rect = this.predictedBackupRect;
+		if (rect) {
+			copyTextureRegion(this.gl, this.predictedBackupTex, this.maskTex, rect.x, rect.y, rect.x, rect.y, rect.width, rect.height);
+			// the composited preview still contains the predicted tail; restore
+			// it from the stroke-start baseline and queue the region for a
+			// rebuild so the presented frame loses the tail too
+			copyTextureRegion(this.gl, this.baselineTex, this.previewComposeTex, rect.x, rect.y, rect.x, rect.y, rect.width, rect.height);
+			this.dirtyBounds.left = Math.min(this.dirtyBounds.left, rect.x);
+			this.dirtyBounds.top = Math.min(this.dirtyBounds.top, rect.y);
+			this.dirtyBounds.right = Math.max(this.dirtyBounds.right, rect.x + rect.width);
+			this.dirtyBounds.bottom = Math.max(this.dirtyBounds.bottom, rect.y + rect.height);
+		}
+		const realCount = this.currentStroke.points.length - this.predictedCount;
+		this.currentStroke.points.length = realCount;
+		this.lastRenderedPoint = Math.min(this.lastRenderedPoint, realCount);
+		this.predictedBackupRect = null;
+		this.predictedCount = 0;
+	}
+
 	beginStroke(layer: OraLayer, point: Point, stroke: StrokeParams & { tool: ToolName }): void {
 		this.currentStroke = { ...stroke, points: [point] };
 		this.sizeSampler = stroke.pressureSize ? buildPressureCurveSampler(stroke.pressureSizeCurve) : null;
@@ -164,6 +254,8 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.lastRenderedPoint = 0;
 		this.strokeBounds = { ...EMPTY_BOUNDS };
 		this.dirtyBounds = { ...EMPTY_BOUNDS };
+		this.predictedBackupRect = null;
+		this.predictedCount = 0;
 
 		clearTexture(this.gl, this.maskTex);
 		clearTexture(this.gl, this.strokeColorTex);
@@ -179,6 +271,9 @@ export class GpuStrokeEngine implements DrawingEngine {
 			return;
 		}
 
+		// predicted points are preview-only; strip them before the stroke is
+		// baked into the layer texture
+		this.rollbackPredictedTail();
 		this.updateStrokeTextures();
 
 		const liveTex = this.layerTextures.get(layer.name);
@@ -206,6 +301,8 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.currentStroke = null;
 		this.sizeSampler = null;
 		this.opacitySampler = null;
+		this.predictedBackupRect = null;
+		this.predictedCount = 0;
 	}
 
 	renderBase(): void {
@@ -455,6 +552,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.destroyOwnedTexture(this.selectionColorTex);
 		this.destroyOwnedTexture(this.selectionOriginalTex);
 		this.destroyOwnedTexture(this.displayTex);
+		this.destroyOwnedTexture(this.predictedBackupTex);
 		if (this.instanceBuffer) {
 			this.gl.deleteBuffer(this.instanceBuffer);
 			this.instanceBuffer = null;
@@ -496,6 +594,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.destroyOwnedTexture(this.selectionColorTex);
 		this.destroyOwnedTexture(this.selectionOriginalTex);
 		this.destroyOwnedTexture(this.displayTex);
+		this.destroyOwnedTexture(this.predictedBackupTex);
 		this.selectionBounds = null;
 		this.selectionLayerName = null;
 
@@ -511,6 +610,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.selectionColorTex = createLayerTexture(this.gl, this.width, this.height);
 		this.selectionOriginalTex = createLayerTexture(this.gl, this.width, this.height);
 		this.displayTex = createLayerTexture(this.gl, this.width, this.height);
+		this.predictedBackupTex = createLayerTexture(this.gl, this.width, this.height, MASK_TEXTURE_FORMAT);
 
 		for (const layer of documentState.layers) {
 			const texture = createLayerTexture(this.gl, this.width, this.height);

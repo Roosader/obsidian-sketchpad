@@ -13,6 +13,8 @@ interface SketchpadPluginData {
 
 	minimalUI?: boolean;
 
+	pointerPredictionEnabled?: boolean;
+
 	leftSidebarPos?: { x: number; y: number };
 	rightSidebarPos?: { x: number; y: number };
 
@@ -50,6 +52,7 @@ export default class SketchpadPlugin extends Plugin {
 	toolSettings: ToolSettingsMap = cloneToolSettings();
 	touchToDrawEnabled = false;
 	minimalUI = true;
+	pointerPredictionEnabled = true;
 	leftSidebarPos: { x: number; y: number } | null = null;
 	rightSidebarPos: { x: number; y: number } | null = null;
 	toolHotkeys: Partial<Record<ViewTool, string>> = { ...DEFAULT_TOOL_HOTKEYS };
@@ -81,6 +84,7 @@ export default class SketchpadPlugin extends Plugin {
 		this.toolSettings = cloneToolSettings(data?.toolSettings);
 		this.touchToDrawEnabled = data?.touchToDrawEnabled ?? false;
 		this.minimalUI = data?.minimalUI ?? true;
+		this.pointerPredictionEnabled = data?.pointerPredictionEnabled ?? true;
 		this.leftSidebarPos = sanitizePanelPos(data?.leftSidebarPos);
 		this.rightSidebarPos = sanitizePanelPos(data?.rightSidebarPos);
 		this.toolHotkeys = { ...DEFAULT_TOOL_HOTKEYS, ...(data?.toolHotkeys ?? {}) };
@@ -186,6 +190,7 @@ export default class SketchpadPlugin extends Plugin {
 			toolSettings: this.toolSettings,
 			touchToDrawEnabled: this.touchToDrawEnabled,
 			minimalUI: this.minimalUI,
+			pointerPredictionEnabled: this.pointerPredictionEnabled,
 			leftSidebarPos: this.leftSidebarPos ?? undefined,
 			rightSidebarPos: this.rightSidebarPos ?? undefined,
 			toolHotkeys: this.toolHotkeys,

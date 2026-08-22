@@ -13,6 +13,15 @@ export interface DrawingEngine {
 	// discards an in-progress stroke without committing it to history
 	cancelStroke(): void;
 
+	// appends browser-predicted points that extend the live preview slightly
+	// ahead of the latest real sample to hide input lag. Predicted points are
+	// rolled back by rollbackPredictedTail before later real samples arrive and
+	// are never part of the committed stroke.
+	appendPredictedTail(points: Point[]): void;
+	// removes any predicted points appended by appendPredictedTail, restoring
+	// the stroke to real samples only
+	rollbackPredictedTail(): void;
+
 	// renders the flattened document
 	renderBase(): void;
 

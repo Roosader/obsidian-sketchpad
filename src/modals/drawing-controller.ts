@@ -1,5 +1,6 @@
 import { getLayerFallbackColor } from '../utilities/layer-colors';
 import { isStylusEraser } from '../utilities/utils';
+import { PointerPredictor } from '../technical/pointer-predictor';
 import type SketchpadPlugin from '../main';
 import type { DrawingEngine } from '../technical/drawing-engine';
 import type { CanvasViewport } from '../technical/viewport';
@@ -42,6 +43,8 @@ export class DrawingController {
 	private frameIntervalMs = 16.7;
 	private lastFrameCallbackTime = 0;
 	private lastPreviewDrawTime = 0;
+
+	private readonly predictor = new PointerPredictor();
 
 	constructor(private readonly deps: DrawingControllerDeps) {}
 
@@ -149,6 +152,7 @@ export class DrawingController {
 
 		this.activeDrawTool = tool;
 		this.rawSamplesSeen = false;
+		this.predictor.reset();
 		this.deps.tools.updateActiveLayer(tool);
 		const layer = this.deps.tools.getTargetLayer(tool);
 		const settings = this.deps.plugin.toolSettings[tool];
@@ -189,12 +193,17 @@ export class DrawingController {
 			return;
 		}
 
+		// predicted points are preview-only; drop any outstanding tail before
+		// real samples continue the stroke
+		this.deps.engine.rollbackPredictedTail();
+
 		// use coalesced events for more fine-grained sampling on fast pointer movements
 		const coalesced = typeof event.getCoalescedEvents === 'function' ? event.getCoalescedEvents() : [];
 		const samples = coalesced.length > 0 ? coalesced : [event];
 		for (const sample of samples) {
 			this.deps.engine.appendPoint(this.deps.viewport.getPoint(sample));
 		}
+		this.appendPredictedTail();
 		this.schedulePreview();
 	};
 
@@ -270,13 +279,19 @@ export class DrawingController {
 		}
 
 		this.rawSamplesSeen = true;
+		// predicted points from the previous update are preview-only; roll them
+		// back before real samples continue the stroke
+		this.deps.engine.rollbackPredictedTail();
 		const coalesced = typeof event.getCoalescedEvents === 'function' ? event.getCoalescedEvents() : [];
 		const samples = coalesced.length > 0 ? coalesced : [event];
-		for (const sample of samples) {
-			this.deps.engine.appendPoint(this.deps.viewport.getPoint(sample));
-		}
-
 		const now = performance.now();
+		for (const sample of samples) {
+			const point = this.deps.viewport.getPoint(sample);
+			this.deps.engine.appendPoint(point);
+			this.predictor.addSample(point, now);
+		}
+		this.appendPredictedTail();
+
 		if (now - this.lastPreviewDrawTime >= Math.max(4, this.frameIntervalMs * 0.6)) {
 			this.previewFrameRequested = false;
 			this.drawPreviewNow();
@@ -315,6 +330,21 @@ export class DrawingController {
 			this.previewFrameRequested = false;
 			this.drawPreviewNow();
 		});
+	}
+
+	// appends the browser's predicted pointer positions to the live preview so
+	// the stroke tip renders slightly ahead of the latest real sample, hiding
+	// residual input lag. Predicted points are rolled back by the engine before
+	// later real samples arrive and never commit to the stroke.
+	private appendPredictedTail(): void {
+		if (!this.deps.plugin.pointerPredictionEnabled) {
+			return;
+		}
+		const points = this.predictor.predict();
+		if (points.length === 0) {
+			return;
+		}
+		this.deps.engine.appendPredictedTail(points);
 	}
 
 	private drawLivePreview(tool: ToolName): void {
