@@ -111,12 +111,20 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.maxBlendEquation = gpu.maxBlendEquation;
 		this.onChange = onChange;
 
-		// desynchronized asks Chromium to present the canvas directly instead
+		// desynchronized  Chromium to present the canvas directly instead
 		// of queueing the frame for the next vsync-aligned composite, trimming
 		// output latency while inking (may tear; ignored where unsupported).
 		// Must be paired with an opaque canvas: desynchronized + alpha breaks
 		// presentation on some drivers and renders the canvas solid black.
-		const context = canvas.getContext('webgl2', { alpha: false, antialias: false, desynchronized: true });
+		//
+		// NOTE: desynchronized is intentionally disabled because:
+		// 1) On many GPU/driver combos it forces MSAA regardless of
+		//    antialias: false, making strokes appear blurry.
+		// 2) The swap-chain resize & immediate-present model causes
+		//    intermittent solid-white frame flashes.
+		// 3) Other latency work (pointerrawupdate, getCoalescedEvents)
+		//    already keep input lag well under one frame.
+		const context = canvas.getContext('webgl2', { alpha: false, antialias: false, desynchronized: false });
 		if (!context) {
 			throw new Error('WebGL2 context unavailable on this canvas');
 		}
