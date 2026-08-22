@@ -131,10 +131,19 @@ export class CursorOverlay {
 		this.refresh();
 	}
 
-	/** Set an additional offset (client-space px) from pointer prediction. */
+	/** Set an additional offset (client-space px) from pointer prediction.
+	 *  Re-positions the cursor immediately so the predicted offset takes effect
+	 *  on the same raw update that computed it, instead of lagging one sample
+	 *  behind (until the next handlePointerMove). */
 	setPredictionOffset(dx: number, dy: number): void {
+		if (dx === this.predictionOffsetX && dy === this.predictionOffsetY) {
+			return;
+		}
 		this.predictionOffsetX = dx;
 		this.predictionOffsetY = dy;
+		if (this.hasPosition && this.isDrawnTool()) {
+			this.place();
+		}
 	}
 
 	// moves the cursor canvas to the latest pointer position 
