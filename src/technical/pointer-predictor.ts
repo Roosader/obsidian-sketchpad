@@ -7,9 +7,14 @@ interface Sample {
 }
 
 const MAX_SAMPLES = 6;
-const PREDICTION_MS = 25; // how far ahead to predict
 const PREDICTION_STEPS = 3; // how many intermediate points to generate
-const MIN_VELOCITY = 0.5; // px/ms below which prediction is suppressed
+
+export interface PredictionConfig {
+	/** Lookahead window in milliseconds (5–50). */
+	predictionMs: number;
+	/** Minimum velocity in px/ms below which prediction is suppressed. */
+	minVelocity: number;
+}
 
 /**
  * Velocity-based pointer predictor that extrapolates a short tail of future
@@ -26,6 +31,16 @@ const MIN_VELOCITY = 0.5; // px/ms below which prediction is suppressed
 export class PointerPredictor {
 	private readonly samples: Sample[] = [];
 	private lastPressure: number | undefined;
+	private config: PredictionConfig;
+
+	constructor(config?: PredictionConfig) {
+		this.config = { predictionMs: 25, minVelocity: 0.5, ...config };
+	}
+
+	/** Replace the live config without resetting the sample buffer. */
+	setConfig(config: PredictionConfig): void {
+		this.config = { ...this.config, ...config };
+	}
 
 	/** Feed one real pointer sample (document-space position + timestamp). */
 	addSample(point: Point, time: number): void {
@@ -79,27 +94,30 @@ export class PointerPredictor {
 		const vy = (sumW * sumWTY - sumWT * sumWY) / det;
 
 		const speed = Math.sqrt(vx * vx + vy * vy);
-		if (speed < MIN_VELOCITY) {
+		if (speed < this.config.minVelocity) {
 			return [];
 		}
 
 		// Damping: reduce prediction as speed decreases toward MIN_VELOCITY
-		const dampFactor = Math.min(1, (speed - MIN_VELOCITY) / (MIN_VELOCITY * 3));
+		const dampFactor = Math.min(1, (speed - this.config.minVelocity) / (this.config.minVelocity * 3));
 		const clampedSpeed = speed * dampFactor;
 
-		// Clamp prediction distance: at most ~25ms of travel, but never more
-		// than ~60px to avoid wild overshoot on fast flicks
-		const maxDistance = clampedSpeed * PREDICTION_MS;
-		const actualDistance = Math.min(maxDistance, 60);
+		// Clamp prediction distance: at most predictionMs of travel, and never
+		// more than a per-call limit that scales with predictionMs so the
+		// "Prediction distance" setting has headroom at higher values
+		// (2.4 px/ms ≈ a fast flick; 2.4 * predictionMs caps the overshoot).
+		const maxDistancePx = Math.min(2.4 * this.config.predictionMs, 120);
+		const maxDistance = clampedSpeed * this.config.predictionMs;
+		const actualDistance = Math.min(maxDistance, maxDistancePx);
 
 		const dirX = speed > 0 ? vx / speed : 0;
 		const dirY = speed > 0 ? vy / speed : 0;
 
-		const stepMs = PREDICTION_MS / PREDICTION_STEPS;
+		const stepMs = this.config.predictionMs / PREDICTION_STEPS;
 		const points: Point[] = [];
 		for (let i = 1; i <= PREDICTION_STEPS; i++) {
 			const t = i * stepMs;
-			const frac = t / PREDICTION_MS;
+			const frac = t / this.config.predictionMs;
 			// Ease-out: prediction tapers off rather than extending at full speed
 			const easedFrac = frac * (2 - frac);
 			points.push({

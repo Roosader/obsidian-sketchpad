@@ -89,6 +89,17 @@ export const DEFAULT_SIZE_HOTKEYS: Partial<Record<SizeAction, string>> = {
 export const SIZE_STEP = 5;
 
 export const DEFAULT_ROTATE_SENSITIVITY = 3; // degrees per press
+export const DEFAULT_PREDICTION_DISTANCE_MS = 25;
+export const MIN_PREDICTION_DISTANCE_MS = 5;
+export const MAX_PREDICTION_DISTANCE_MS = 50;
+
+export const DEFAULT_PREDICTION_SENSITIVITY = 50; // slider 0–100
+export const MIN_PREDICTION_SENSITIVITY = 0;
+export const MAX_PREDICTION_SENSITIVITY = 100;
+// Maps slider 0→2.0 px/ms (stable, only predicts on fast moves),
+// slider 100→0.1 px/ms (responsive, predicts even on slow strokes).
+export const PREDICTION_MIN_VEL_AT_ZERO = 2.0;
+export const PREDICTION_MIN_VEL_AT_FULL = 0.1;
 export const MIN_ROTATE_SENSITIVITY = 1;
 export const MAX_ROTATE_SENSITIVITY = 90;
 

@@ -1,6 +1,7 @@
 import { getLayerFallbackColor } from '../utilities/layer-colors';
 import { isStylusEraser } from '../utilities/utils';
-import { PointerPredictor } from '../technical/pointer-predictor';
+import { PointerPredictor, type PredictionConfig } from '../technical/pointer-predictor';
+import { sensitivityToMinVelocity } from '../utilities/utils';
 import type SketchpadPlugin from '../main';
 import type { DrawingEngine } from '../technical/drawing-engine';
 import type { CanvasViewport } from '../technical/viewport';
@@ -44,7 +45,7 @@ export class DrawingController {
 	private lastFrameCallbackTime = 0;
 	private lastPreviewDrawTime = 0;
 
-	private readonly predictor = new PointerPredictor();
+	private readonly predictor: PointerPredictor;
 
 	// pointer prediction offset (client-space px) from the most recent
 	// predict + append cycle, forwarded to the cursor overlay so the custom
@@ -52,7 +53,32 @@ export class DrawingController {
 	private cursorPredictionDx = 0;
 	private cursorPredictionDy = 0;
 
-	constructor(private readonly deps: DrawingControllerDeps) {}
+	constructor(private readonly deps: DrawingControllerDeps) {
+		this.predictor = this.buildPredictor();
+	}
+
+	/** Build a predictor config from the current plugin settings. */
+	private buildPredictor(): PointerPredictor {
+		const config: PredictionConfig = {
+			predictionMs: this.deps.plugin.pointerPredictionDistanceMs,
+			minVelocity: sensitivityToMinVelocity(this.deps.plugin.pointerPredictionSensitivity),
+		};
+		return new PointerPredictor(config);
+	}
+
+	/** Called when the user changes prediction settings — updates the live
+	 *  predictor without resetting the sample buffer mid-stroke. */
+	updatePredictionConfig(): void {
+		if (!this.deps.plugin.pointerPredictionEnabled) {
+			this.cursorPredictionDx = 0;
+			this.cursorPredictionDy = 0;
+		}
+		const config: PredictionConfig = {
+			predictionMs: this.deps.plugin.pointerPredictionDistanceMs,
+			minVelocity: sensitivityToMinVelocity(this.deps.plugin.pointerPredictionSensitivity),
+		};
+		this.predictor.setConfig(config);
+	}
 
 	// handles pointer events that start from outside image
 	pointerDown(event: PointerEvent): void {

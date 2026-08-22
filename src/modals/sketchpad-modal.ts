@@ -1129,6 +1129,12 @@ export default class SketchpadView extends ItemView {
 		);
 	}
 
+	/** Called when the user changes pointer-prediction settings — applies
+	 *  them to the live drawing controller without restarting the stroke. */
+	public updatePredictionConfig(): void {
+		this.drawingController?.updatePredictionConfig();
+	}
+
 	private handleGridToggle(enabled: boolean): void {
 		this.plugin.gridEnabled = enabled;
 		void this.plugin.saveToolSettings();

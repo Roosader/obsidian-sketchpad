@@ -1,8 +1,8 @@
 import { PluginSettingTab, Setting, setIcon } from 'obsidian';
 import SketchpadPlugin from '../main';
 import type { LayerName, ViewTool, RotateAction, SizeAction } from './types';
-import { MODIFIER_HOTKEY_KEYS, MIN_ROTATE_SENSITIVITY, MAX_ROTATE_SENSITIVITY, DEFAULT_FILE_NAME, DEFAULT_IMAGE_WIDTH, DEFAULT_IMAGE_HEIGHT, MAX_IMAGE_DIMENSION, MAX_GRID_SIZE, AUTOSAVE_INTERVAL_OPTIONS } from './constants';
-import {normalizeHotkeyKey} from './utils';
+import { MODIFIER_HOTKEY_KEYS, MIN_ROTATE_SENSITIVITY, MAX_ROTATE_SENSITIVITY, DEFAULT_FILE_NAME, DEFAULT_IMAGE_WIDTH, DEFAULT_IMAGE_HEIGHT, MAX_IMAGE_DIMENSION, MAX_GRID_SIZE, AUTOSAVE_INTERVAL_OPTIONS, DEFAULT_PREDICTION_DISTANCE_MS, MIN_PREDICTION_DISTANCE_MS, MAX_PREDICTION_DISTANCE_MS, MIN_PREDICTION_SENSITIVITY, MAX_PREDICTION_SENSITIVITY, DEFAULT_PREDICTION_SENSITIVITY } from './constants';
+import {normalizeHotkeyKey, sensitivityToMinVelocity} from './utils';
 
 const IGNORED_HOTKEY_KEYS = new Set([
 	'CapsLock', 'Escape', 'Tab',
@@ -99,6 +99,27 @@ export class SketchpadSettingTab extends PluginSettingTab
                         await this.plugin.saveToolSettings();
                     });
             });
+        new Setting(containerEl)
+            .setName('Reset sidebar positions')
+            .addButton((button) => {
+                button
+                    .setButtonText('Reset')
+                    .onClick(async () => {
+                        this.plugin.leftSidebarPos = null;
+                        this.plugin.rightSidebarPos = null;
+                        await this.plugin.saveToolSettings();
+                        this.plugin.resetPanelPositions();
+                    });
+            });
+
+        new Setting(containerEl)
+            .setName('Pointer prediction')
+            .setHeading();
+
+        let distanceSlider: import('obsidian').SliderComponent;
+        let sensitivitySlider: import('obsidian').SliderComponent;
+        let distanceSetting: import('obsidian').Setting;
+        let predSensitivitySetting: import('obsidian').Setting;
 
         new Setting(containerEl)
             .setName('Enable pointer prediction')
@@ -113,19 +134,62 @@ export class SketchpadSettingTab extends PluginSettingTab
                     .onChange(async (value) => {
                         this.plugin.pointerPredictionEnabled = value;
                         await this.plugin.saveToolSettings();
+                        this.plugin.notifyPredictionSettingsChanged();
+                        // enable/disable the sub-controls
+                        distanceSlider.setDisabled(!value);
+                        sensitivitySlider.setDisabled(!value);
+                        distanceSetting.setDisabled(!value);
+                        predSensitivitySetting.setDisabled(!value);
                     });
             });
 
+        distanceSetting = new Setting(containerEl)
+            .setName('Prediction distance')
+            .setDesc('How far ahead of the cursor the stroke tip renders. Higher hides more input lag but may overshoot on fast strokes.')
+            .addSlider((slider) => {
+                distanceSlider = slider;
+                slider
+                    .setLimits(MIN_PREDICTION_DISTANCE_MS, MAX_PREDICTION_DISTANCE_MS, 1)
+                    .setValue(this.plugin.pointerPredictionDistanceMs)
+                    .onChange(async (value) => {
+                        this.plugin.pointerPredictionDistanceMs = value;
+                        await this.plugin.saveToolSettings();
+                        this.plugin.notifyPredictionSettingsChanged();
+                    });
+            });
+
+        predSensitivitySetting = new Setting(containerEl)
+            .setName('Prediction sensitivity')
+            .setDesc('How readily prediction engages on slow strokes. Lower (Low) is more stable at rest; higher (High) feels more responsive on slow lines.')
+            .addSlider((slider) => {
+                sensitivitySlider = slider;
+                slider
+                    .setLimits(MIN_PREDICTION_SENSITIVITY, MAX_PREDICTION_SENSITIVITY, 1)
+                    .setValue(this.plugin.pointerPredictionSensitivity)
+                    .onChange(async (value) => {
+                        this.plugin.pointerPredictionSensitivity = value;
+                        await this.plugin.saveToolSettings();
+                        this.plugin.notifyPredictionSettingsChanged();
+                    });
+            });
+
+        // Apply initial disabled state based on the toggle
+        const predictionEnabled = this.plugin.pointerPredictionEnabled;
+        distanceSetting.setDisabled(!predictionEnabled);
+        predSensitivitySetting.setDisabled(!predictionEnabled);
+
         new Setting(containerEl)
-            .setName('Reset sidebar positions')
+            .setName('Reset prediction settings')
             .addButton((button) => {
                 button
-                    .setButtonText('Reset')
+                    .setButtonText('Reset to defaults')
                     .onClick(async () => {
-                        this.plugin.leftSidebarPos = null;
-                        this.plugin.rightSidebarPos = null;
+                        this.plugin.pointerPredictionDistanceMs = DEFAULT_PREDICTION_DISTANCE_MS;
+                        this.plugin.pointerPredictionSensitivity = DEFAULT_PREDICTION_SENSITIVITY;
                         await this.plugin.saveToolSettings();
-                        this.plugin.resetPanelPositions();
+                        this.plugin.notifyPredictionSettingsChanged();
+                        // Refresh the whole settings tab so the sliders update
+                        this.display();
                     });
             });
 

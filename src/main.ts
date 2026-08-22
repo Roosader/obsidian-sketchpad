@@ -2,10 +2,10 @@ import { Plugin } from 'obsidian';
 import SketchpadView, { SKETCHPAD_VIEW_TYPE } from './modals/sketchpad-modal';
 import { registerOraEmbedPreview } from './rendering/ora-embed';
 import { cloneToolSettings, type ToolSettings, type ToolSettingsMap } from './utilities/tool-settings';
-import { DEFAULT_TOOL_HOTKEYS, DEFAULT_ROTATE_HOTKEYS, DEFAULT_SIZE_HOTKEYS, DEFAULT_ROTATE_SENSITIVITY, DEFAULT_FILE_NAME, DEFAULT_IMAGE_WIDTH, DEFAULT_IMAGE_HEIGHT, DEFAULT_PAPER_COLOR, DEFAULT_GRID_SIZE, DEFAULT_GRID_COLOR, DEFAULT_GRID_OPACITY, DEFAULT_LAYER_ORDER, DEFAULT_AUTOSAVE_INTERVAL_MINUTES } from './utilities/constants';
+import { DEFAULT_TOOL_HOTKEYS, DEFAULT_ROTATE_HOTKEYS, DEFAULT_SIZE_HOTKEYS, DEFAULT_ROTATE_SENSITIVITY, DEFAULT_FILE_NAME, DEFAULT_IMAGE_WIDTH, DEFAULT_IMAGE_HEIGHT, DEFAULT_PAPER_COLOR, DEFAULT_GRID_SIZE, DEFAULT_GRID_COLOR, DEFAULT_GRID_OPACITY, DEFAULT_LAYER_ORDER, DEFAULT_AUTOSAVE_INTERVAL_MINUTES, DEFAULT_PREDICTION_DISTANCE_MS, DEFAULT_PREDICTION_SENSITIVITY } from './utilities/constants';
 import type { ToolName, ViewTool, RotateAction, SizeAction, LayerName } from './utilities/types';
 import { SketchpadSettingTab } from './utilities/settings';
-import { sanitizeAutosaveInterval, sanitizeDimension, sanitizeGridOpacity, sanitizeGridSize, sanitizeLayerOrder, sanitizePaperColor, sanitizePanelPos } from './utilities/utils';
+import { sanitizeAutosaveInterval, sanitizeDimension, sanitizeGridOpacity, sanitizeGridSize, sanitizeLayerOrder, sanitizePaperColor, sanitizePanelPos, sanitizePredictionDistance, sanitizePredictionSensitivity } from './utilities/utils';
 
 interface SketchpadPluginData {
 	toolSettings?: Partial<Record<ToolName, Partial<ToolSettings>>>;
@@ -14,6 +14,8 @@ interface SketchpadPluginData {
 	minimalUI?: boolean;
 
 	pointerPredictionEnabled?: boolean;
+	pointerPredictionDistanceMs?: number;
+	pointerPredictionSensitivity?: number;
 
 	leftSidebarPos?: { x: number; y: number };
 	rightSidebarPos?: { x: number; y: number };
@@ -53,6 +55,8 @@ export default class SketchpadPlugin extends Plugin {
 	touchToDrawEnabled = false;
 	minimalUI = true;
 	pointerPredictionEnabled = true;
+	pointerPredictionDistanceMs = DEFAULT_PREDICTION_DISTANCE_MS;
+	pointerPredictionSensitivity = DEFAULT_PREDICTION_SENSITIVITY;
 	leftSidebarPos: { x: number; y: number } | null = null;
 	rightSidebarPos: { x: number; y: number } | null = null;
 	toolHotkeys: Partial<Record<ViewTool, string>> = { ...DEFAULT_TOOL_HOTKEYS };
@@ -85,6 +89,8 @@ export default class SketchpadPlugin extends Plugin {
 		this.touchToDrawEnabled = data?.touchToDrawEnabled ?? false;
 		this.minimalUI = data?.minimalUI ?? true;
 		this.pointerPredictionEnabled = data?.pointerPredictionEnabled ?? true;
+		this.pointerPredictionDistanceMs = sanitizePredictionDistance(data?.pointerPredictionDistanceMs, DEFAULT_PREDICTION_DISTANCE_MS);
+		this.pointerPredictionSensitivity = sanitizePredictionSensitivity(data?.pointerPredictionSensitivity, DEFAULT_PREDICTION_SENSITIVITY);
 		this.leftSidebarPos = sanitizePanelPos(data?.leftSidebarPos);
 		this.rightSidebarPos = sanitizePanelPos(data?.rightSidebarPos);
 		this.toolHotkeys = { ...DEFAULT_TOOL_HOTKEYS, ...(data?.toolHotkeys ?? {}) };
@@ -191,6 +197,8 @@ export default class SketchpadPlugin extends Plugin {
 			touchToDrawEnabled: this.touchToDrawEnabled,
 			minimalUI: this.minimalUI,
 			pointerPredictionEnabled: this.pointerPredictionEnabled,
+			pointerPredictionDistanceMs: this.pointerPredictionDistanceMs,
+			pointerPredictionSensitivity: this.pointerPredictionSensitivity,
 			leftSidebarPos: this.leftSidebarPos ?? undefined,
 			rightSidebarPos: this.rightSidebarPos ?? undefined,
 			toolHotkeys: this.toolHotkeys,
@@ -219,6 +227,13 @@ export default class SketchpadPlugin extends Plugin {
 	notifyGridSettingsChanged(): void {
 		for (const leaf of this.app.workspace.getLeavesOfType(SKETCHPAD_VIEW_TYPE)) {
 			(leaf.view as SketchpadView).updateGridOverlay();
+		}
+	}
+
+	// Push pointer-prediction settings to every open sketchpad view
+	notifyPredictionSettingsChanged(): void {
+		for (const leaf of this.app.workspace.getLeavesOfType(SKETCHPAD_VIEW_TYPE)) {
+			(leaf.view as SketchpadView).updatePredictionConfig();
 		}
 	}
 
