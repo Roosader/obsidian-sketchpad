@@ -216,14 +216,21 @@ export const STROKE_PREVIEW_SHADER: ShaderSource = {
 			midRgb = midA > 0.0001 ? (srcRgb * srcA + below.rgb * below.a * (1.0 - srcA)) / midA : vec3(0.0);
 		}
 
+		float outA;
+		vec3 outRgb;
 		float aboveA = above.a;
 		if (aboveA <= 0.0) {
-			outColor = vec4(midRgb, midA);
-			return;
+			outA = midA;
+			outRgb = midRgb;
+		} else {
+			outA = aboveA + midA * (1.0 - aboveA);
+			outRgb = outA > 0.0001 ? (above.rgb * aboveA + midRgb * midA * (1.0 - aboveA)) / outA : vec3(0.0);
 		}
-		float outA = aboveA + midA * (1.0 - aboveA);
-		vec3 outRgb = outA > 0.0001 ? (above.rgb * aboveA + midRgb * midA * (1.0 - aboveA)) / outA : vec3(0.0);
-		outColor = vec4(outRgb, outA);
+		// this pass writes the presentation texture, and the canvas presents
+		// opaquely (alpha: false + desynchronized), so flatten whatever is
+		// still transparent over white instead of letting it darken to black
+		outRgb = mix(vec3(1.0), outRgb, outA);
+		outColor = vec4(outRgb, 1.0);
 	}
 	`,
 };

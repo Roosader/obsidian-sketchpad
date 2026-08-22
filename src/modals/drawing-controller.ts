@@ -33,6 +33,16 @@ export class DrawingController {
 	// one GPU composite of the in-progress stroke
 	private previewFrameRequested = false;
 
+	// set once a pointerrawupdate has fed the active stroke; pointermove then
+	// stops appending samples so the same movement isn't recorded twice
+	private rawSamplesSeen = false;
+
+	// rolling estimate of the display's refresh interval, used to rate-limit
+	// immediate previews triggered by high-frequency raw pointer updates
+	private frameIntervalMs = 16.7;
+	private lastFrameCallbackTime = 0;
+	private lastPreviewDrawTime = 0;
+
 	constructor(private readonly deps: DrawingControllerDeps) {}
 
 	// handles pointer events that start from outside image
@@ -138,6 +148,7 @@ export class DrawingController {
 		}
 
 		this.activeDrawTool = tool;
+		this.rawSamplesSeen = false;
 		this.deps.tools.updateActiveLayer(tool);
 		const layer = this.deps.tools.getTargetLayer(tool);
 		const settings = this.deps.plugin.toolSettings[tool];
@@ -169,6 +180,12 @@ export class DrawingController {
 			return;
 		}
 		if (!this.deps.engine.isDrawing() || !this.activeDrawTool) {
+			return;
+		}
+		// while pointerrawupdate feeds the stroke, pointermove only carries a
+		// delayed copy of the same samples - appending them again would
+		// duplicate every segment
+		if (this.rawSamplesSeen) {
 			return;
 		}
 
@@ -231,6 +248,53 @@ export class DrawingController {
 	}
 
 	// helpers
+
+	// consumes pointerrawupdate samples at native device rate instead of
+	// waiting for the next rAF-aligned pointermove, so fast strokes reach the
+	// GPU earlier. Renders immediately when the previous preview is old enough
+	// to leave headroom before vsync; otherwise falls back to the rAF path.
+	handleRawPointerUpdate = (event: PointerEvent): void => {
+		// touch has its own gesture pipeline; view tools and lasso route
+		// through pointermove
+		if (event.pointerType === 'touch') {
+			return;
+		}
+		if (!this.deps.engine.isDrawing() || !this.activeDrawTool) {
+			return;
+		}
+		if (this.deps.viewport.isPanning || this.deps.viewport.isZooming || this.deps.viewport.isRotating) {
+			return;
+		}
+		if (this.deps.tools.getCurrentTool() === 'lasso') {
+			return;
+		}
+
+		this.rawSamplesSeen = true;
+		const coalesced = typeof event.getCoalescedEvents === 'function' ? event.getCoalescedEvents() : [];
+		const samples = coalesced.length > 0 ? coalesced : [event];
+		for (const sample of samples) {
+			this.deps.engine.appendPoint(this.deps.viewport.getPoint(sample));
+		}
+
+		const now = performance.now();
+		if (now - this.lastPreviewDrawTime >= Math.max(4, this.frameIntervalMs * 0.6)) {
+			this.previewFrameRequested = false;
+			this.drawPreviewNow();
+		} else {
+			this.schedulePreview();
+		}
+	};
+
+	// renders the in-progress stroke and records when it happened so raw
+	// updates can tell whether another immediate render fits before vsync
+	private drawPreviewNow(): void {
+		if (!this.deps.engine.isDrawing() || !this.activeDrawTool) {
+			return;
+		}
+		this.drawLivePreview(this.activeDrawTool);
+		this.lastPreviewDrawTime = performance.now();
+	}
+
 	// coalesces multiple pointermove events into a single preview render per
 	// animation frame, so the expensive full-canvas composite runs at most
 	// once per frame instead of once per pointer event.
@@ -239,11 +303,17 @@ export class DrawingController {
 			return;
 		}
 		this.previewFrameRequested = true;
-		window.requestAnimationFrame(() => {
-			this.previewFrameRequested = false;
-			if (this.deps.engine.isDrawing() && this.activeDrawTool) {
-				this.drawLivePreview(this.activeDrawTool);
+		window.requestAnimationFrame((time) => {
+			// track the display's refresh interval from consecutive frame times
+			if (this.lastFrameCallbackTime > 0) {
+				const delta = time - this.lastFrameCallbackTime;
+				if (delta >= 2 && delta <= 100) {
+					this.frameIntervalMs += (delta - this.frameIntervalMs) * 0.25;
+				}
 			}
+			this.lastFrameCallbackTime = time;
+			this.previewFrameRequested = false;
+			this.drawPreviewNow();
 		});
 	}
 

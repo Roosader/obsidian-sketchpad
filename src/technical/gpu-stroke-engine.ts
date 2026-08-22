@@ -103,7 +103,12 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.maxBlendEquation = gpu.maxBlendEquation;
 		this.onChange = onChange;
 
-		const context = canvas.getContext('webgl2', { alpha: true, antialias: false, premultipliedAlpha: false });
+		// desynchronized asks Chromium to present the canvas directly instead
+		// of queueing the frame for the next vsync-aligned composite, trimming
+		// output latency while inking (may tear; ignored where unsupported).
+		// Must be paired with an opaque canvas: desynchronized + alpha breaks
+		// presentation on some drivers and renders the canvas solid black.
+		const context = canvas.getContext('webgl2', { alpha: false, antialias: false, desynchronized: true });
 		if (!context) {
 			throw new Error('WebGL2 context unavailable on this canvas');
 		}
@@ -207,7 +212,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		if (this.destroyed) {
 			return;
 		}
-		this.compositeLayerStack(this.documentState.layers, this.scratchA, this.scratchB);
+		this.compositeLayerStack(this.documentState.layers, this.scratchA, this.scratchB, { r: 1, g: 1, b: 1, a: 1 });
 		this.presentComposite();
 	}
 
@@ -402,7 +407,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 			return null;
 		}
 
-		this.compositeLayerStack(this.documentState.layers, this.scratchA, this.scratchB);
+		this.compositeLayerStack(this.documentState.layers, this.scratchA, this.scratchB, { r: 1, g: 1, b: 1, a: 1 });
 		const pixel = new Uint8Array(4);
 		this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.lastStackResult.framebuffer);
 		this.gl.readPixels(x, this.height - 1 - y, 1, 1, this.gl.RGBA, this.gl.UNSIGNED_BYTE, pixel);
@@ -892,8 +897,12 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.drawFullscreen();
 	}
 
-	private compositeLayerStack(layers: OraLayer[], accumA: GpuTexture, accumB: GpuTexture): void {
-		clearTexture(this.gl, accumA);
+	private compositeLayerStack(layers: OraLayer[], accumA: GpuTexture, accumB: GpuTexture, backdrop: { r: number; g: number; b: number; a: number } = { r: 0, g: 0, b: 0, a: 0 }): void {
+		// transparent backdrop by default so partial stacks (the below/above
+		// caches) keep true alpha for later "over" compositing; callers that
+		// produce the final presented image pass opaque white, since the
+		// canvas presents opaquely (alpha: false + desynchronized)
+		clearTexture(this.gl, accumA, backdrop);
 		let current = accumA;
 		let other = accumB;
 		for (const layer of layers) {
@@ -913,7 +922,8 @@ export class GpuStrokeEngine implements DrawingEngine {
 	}
 
 	private compositeLayerStackWithSubstitution(layers: OraLayer[], activeName: string, substituteTex: GpuTexture, accumA: GpuTexture, accumB: GpuTexture): void {
-		clearTexture(this.gl, accumA);
+		// same opaque-white backdrop as compositeLayerStack
+		clearTexture(this.gl, accumA, { r: 1, g: 1, b: 1, a: 1 });
 		let current = accumA;
 		let other = accumB;
 		for (const layer of layers) {
