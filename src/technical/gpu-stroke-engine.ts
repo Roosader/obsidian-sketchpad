@@ -77,8 +77,10 @@ export class GpuStrokeEngine implements DrawingEngine {
 
 	private instanceBuffer: WebGLBuffer | null = null;
 	private instanceCapacityBytes = 0;
-	// growable scratch buffer for stamp instance data - avoids allocating a new Float32Array on every pointermove while drawing.
+	// growable scratch buffer for stamp instance data — avoids allocating a
+	// new Float32Array (or number[]) on every pointermove while drawing.
 	private stampData = new Float32Array(0);
+	private stampWriteIndex = 0; // next free slot in stampData (floats)
 
 	private currentStroke: Stroke | null = null;
 	private sizeSampler: PressureCurveSampler | null = null;
@@ -734,9 +736,9 @@ export class GpuStrokeEngine implements DrawingEngine {
 			return null;
 		}
 
-		const instances = this.collectNewStampInstances();
-		if (instances.length > 0) {
-			this.runStampPass(instances);
+		const stampCount = this.collectNewStamps();
+		if (stampCount > 0) {
+			this.runStampPass(stampCount);
 		}
 
 		const scissor = this.toScissorRect(this.dirtyBounds);
@@ -750,28 +752,30 @@ export class GpuStrokeEngine implements DrawingEngine {
 		return scissor;
 	}
 
-	private collectNewStampInstances(): number[] {
+	/** Write new stamp instances directly into this.stampData (no intermediate
+	 *  number[] allocation), then return the instance count. */
+	private collectNewStamps(): number {
 		if (!this.currentStroke) {
-			return [];
+			return 0;
 		}
 		const points = this.currentStroke.points;
 		if (points.length === 0) {
-			return [];
+			return 0;
 		}
 
-		const instances: number[] = [];
+		this.stampWriteIndex = 0;
 		if (this.lastRenderedPoint === 0) {
-			this.pushStampInstance(instances, points[0]!);
+			this.pushStampInstance(points[0]!);
 			this.lastRenderedPoint = 1;
 		}
 		while (this.lastRenderedPoint < points.length) {
-			this.pushSegmentInstances(instances, points[this.lastRenderedPoint - 1]!, points[this.lastRenderedPoint]!);
+			this.pushSegmentInstances(points[this.lastRenderedPoint - 1]!, points[this.lastRenderedPoint]!);
 			this.lastRenderedPoint += 1;
 		}
-		return instances;
+		return this.stampWriteIndex / 5;
 	}
 
-	private pushSegmentInstances(instances: number[], a: Point, b: Point): void {
+	private pushSegmentInstances(a: Point, b: Point): void {
 		if (!this.currentStroke) {
 			return;
 		}
@@ -793,7 +797,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 
 		for (let i = 1; i <= steps; i += 1) {
 			const t = i / steps;
-			this.pushStampInstance(instances, {
+			this.pushStampInstance({
 				x: a.x + dx * t,
 				y: a.y + dy * t,
 				pressure: (a.pressure ?? 1) + ((b.pressure ?? 1) - (a.pressure ?? 1)) * t,
@@ -801,7 +805,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		}
 	}
 
-	private pushStampInstance(instances: number[], point: Point): void {
+	private pushStampInstance(point: Point): void {
 		if (!this.currentStroke) {
 			return;
 		}
@@ -830,22 +834,30 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.dirtyBounds.right = Math.max(this.dirtyBounds.right, right);
 		this.dirtyBounds.bottom = Math.max(this.dirtyBounds.bottom, bottom);
 
-		instances.push(point.x, point.y, radius, opacity, this.currentStroke.hardness / 100);
+		// Grow stampData if needed (5 floats per instance)
+		const needed = this.stampWriteIndex + 5;
+		if (this.stampData.length < needed) {
+			const bigger = new Float32Array(Math.max(needed, this.stampData.length * 2));
+			bigger.set(this.stampData);
+			this.stampData = bigger;
+		}
+		this.stampData[this.stampWriteIndex] = point.x;
+		this.stampData[this.stampWriteIndex + 1] = point.y;
+		this.stampData[this.stampWriteIndex + 2] = radius;
+		this.stampData[this.stampWriteIndex + 3] = opacity;
+		this.stampData[this.stampWriteIndex + 4] = this.currentStroke.hardness / 100;
+		this.stampWriteIndex = needed;
 	}
 
-	private runStampPass(instances: number[]): void {
-		const count = instances.length / 5;
-		if (this.stampData.length < instances.length) {
-			this.stampData = new Float32Array(instances.length);
-		}
-		this.stampData.set(instances);
-		this.ensureInstanceCapacity(this.stampData.byteLength);
+	private runStampPass(instanceCount: number): void {
+		const bytes = instanceCount * 5 * 4; // 5 floats × 4 bytes each
+		this.ensureInstanceCapacity(bytes);
 		if (!this.instanceBuffer) {
 			return;
 		}
 
 		this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.instanceBuffer);
-		this.gl.bufferSubData(this.gl.ARRAY_BUFFER, 0, this.stampData);
+		this.gl.bufferSubData(this.gl.ARRAY_BUFFER, 0, this.stampData.subarray(0, instanceCount * 5));
 
 		this.bindTarget(this.maskTex, null, null);
 		this.gl.enable(this.gl.BLEND);
@@ -854,7 +866,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.gl.useProgram(this.stampProgram.program);
 		this.gl.uniform2f(this.uniform(this.stampProgram, 'uCanvasSize'), this.width, this.height);
 		this.gl.bindVertexArray(this.stampVao);
-		this.gl.drawArraysInstanced(this.gl.TRIANGLES, 0, 6, count);
+		this.gl.drawArraysInstanced(this.gl.TRIANGLES, 0, 6, instanceCount);
 		this.cleanupDrawState();
 	}
 

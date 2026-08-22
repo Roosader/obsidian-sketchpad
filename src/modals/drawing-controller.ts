@@ -299,7 +299,10 @@ export class DrawingController {
 		for (const sample of samples) {
 			const point = this.deps.viewport.getPoint(sample);
 			this.deps.engine.appendPoint(point);
-			this.predictor.addSample(point, now);
+			// Use the sample's own timeStamp so the predictor sees the true
+			// sub-frame spacing between coalesced events, yielding a sharper
+			// velocity estimate on fast strokes.
+			this.predictor.addSample(point, sample.timeStamp ?? now);
 		}
 		this.appendPredictedTail();
 
