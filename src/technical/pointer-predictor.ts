@@ -7,444 +7,701 @@ interface Sample {
 }
 
 const MAX_SAMPLES = 6;
-const PREDICTION_STEPS = 3; // how many intermediate points to generate
+const PREDICTION_STEPS = 3;
 
 export interface PredictionConfig {
-	/** Lookahead window in milliseconds (5–50). */
+	/** Lookahead window in milliseconds. */
 	predictionMs: number;
+
 	/** Minimum velocity in px/ms below which prediction is suppressed. */
 	minVelocity: number;
 }
 
-// --- Confidence-factor tuning constants ( Balanced preset ) ---------------
-// These shape how aggressively prediction is reduced on different motion
-// patterns. All factors combine into a single confidence ∈ [0,1] that scales
-// the prediction distance and sharpens the ease-out. Kept internal (no UI)
-// so the predictor stays self-tuning.
+/*
+ * Internal tuning constants.
+ *
+ * These are intentionally kept out of PredictionConfig so the public
+ * configuration remains simple.
+ */
 
-// straightness: 1 / (1 + k * linearResidual). Larger k → curves damp harder.
-const STRAIGHTNESS_K = 0.04;
+// Minimum confidence. Prevents several mildly-bad signals from multiplying
+// together and completely eliminating prediction.
+const CONFIDENCE_FLOOR = 0.15;
 
-// speedStability: 1 / (1 + k * coefficientOfVariation(speeds)).
-const SPEED_STABILITY_K = 1.5;
+// Recent velocity smoothing.
+// Higher = responds faster.
+const VELOCITY_SMOOTH_STRAIGHT = 0.30;
+const VELOCITY_SMOOTH_TURNING = 0.75;
 
-// decelDamp: when the pen decelerates, prediction shrinks proportionally.
-// factor = clamp(1 + k * accelAlongDir / speed, 0, 1); negative when slowing.
+// Direction consistency.
+// Turns smaller than this are considered normal pen curvature.
+const TURN_START = 0.08;
+
+// Turns larger than this are increasingly treated as corners.
+const TURN_FULL = 1.05;
+
+// Sharp-corner prediction floor.
+const CORNER_DAMP_FLOOR = 0.08;
+
+// Deceleration prediction floor.
+const DECEL_DAMP_FLOOR = 0.20;
+
+// How strongly negative acceleration along the travel direction reduces
+// prediction.
 const DECEL_K = 3.0;
 
-// cornerDamp: if the most recent turn exceeds this (radians), prediction is
-// sharply reduced so the tail doesn't shoot out of a corner in the old
-// direction. ~1.05 rad ≈ 60°.
-const CORNER_TURN_THRESHOLD = 1.05;
+// Speed stability sensitivity.
+const SPEED_STABILITY_K = 1.25;
 
-// How far corner damp reduces confidence (0.15 = drop to ~15%).
-const CORNER_DAMP_FLOOR = 0.15;
+// Curvature suppression at low confidence.
+const MIN_CURVE_CONFIDENCE = 0.15;
 
-// quadratic/linear blend band: below BLEND_LOW the tail follows the quadratic
-// (curve) extrapolation; above BLEND_HIGH it follows the linear (tangent)
-// extrapolation. In between the two blend smoothly.
-const BLEND_LOW = 0.35;
-const BLEND_HIGH = 0.75;
+// Maximum useful angular velocity in radians/ms.
+// This prevents noisy samples from producing absurd spiraling predictions.
+const MAX_TURN_RATE = 0.03;
 
-// adaptive ease-out: easeSharpness = lerp(EASE_GENTLE, EASE_STEEP, 1 - conf).
-// Higher sharpness pulls the tail back sooner (less overshoot).
-const EASE_GENTLE = 2.0; // high confidence: matches the original ease-out
-const EASE_STEEP = 4.5; // low confidence: tail retracts quickly
+// Maximum curvature angle allowed over the complete prediction window.
+const MAX_TOTAL_TURN = Math.PI * 0.45;
 
 /**
- * Velocity-based pointer predictor that extrapolates a short tail of future
- * positions ahead of the most recent real sample. Raw pointer updates feed
- * samples; when prediction is enabled, predict() returns 2-3 extrapolated
- * points that the engine renders as a preview tail (rolled back before the
- * next real sample arrives).
+ * Pointer predictor designed for short-latency pen prediction.
  *
- * Algorithm: weighted-least-squares linear fit over a small rolling buffer
- * with exponential decay weights, so the predictor responds quickly to
- * direction changes. A parallel quadratic fit captures acceleration/curvature.
- * Geometry-derived confidence factors (straightness, direction consistency,
- * speed stability, deceleration, sharp-corner detection) scale the prediction
- * distance and adapt the ease-out so the tail extends confidently on clean
- * straight strokes but retracts on curves, corners, and deceleration —
- * preventing overshoots without a separate setting. Prediction is clamped to
- * a configurable lookahead window.
+ * The predictor estimates recent velocity using a weighted linear regression,
+ * estimates turning from recent segment directions, estimates deceleration
+ * from recent speed, and generates a short arc-shaped prediction tail.
+ *
+ * The public API matches the previous predictor:
+ *
+ * - addSample()
+ * - predict()
+ * - lastSample()
+ * - reset()
+ * - setConfig()
  */
 export class PointerPredictor {
 	private readonly samples: Sample[] = [];
+
 	private lastPressure: number | undefined;
+
 	private config: PredictionConfig;
-	// rolling estimate of the inter-sample interval, used to scale the weight
-	// decay so the fit behaves consistently regardless of sampling rate:
-	// - pointerrawupdate (e.g. 4ms): short decay → fine smoothing window
-	// - pointermove fallback (60Hz, 16.7ms): short decay drops stale samples
-	//   fast enough that stationary samples (from before the pen started
-	//   moving) don't anchor the velocity estimate near zero
+
 	private estimatedIntervalMs = 16;
 
+	/*
+	 * Smoothed velocity state.
+	 *
+	 * This makes predictions visually stable between events while adaptive
+	 * smoothing allows quick response when the pen changes direction.
+	 */
+	private filteredVx = 0;
+	private filteredVy = 0;
+	private hasFilteredVelocity = false;
+
 	constructor(config?: PredictionConfig) {
-		this.config = { predictionMs: 25, minVelocity: 0.5, ...config };
+		this.config = {predictionMs: 25,minVelocity: 0.5,...config,};
 	}
 
 	/** Replace the live config without resetting the sample buffer. */
 	setConfig(config: PredictionConfig): void {
-		this.config = { ...this.config, ...config };
+		this.config = {...this.config,...config,};
 	}
 
-	/** Feed one real pointer sample (document-space position + timestamp). */
+	/** Feed one real pointer sample. */
 	addSample(point: Point, time: number): void {
-		// update the rolling estimate of the inter-sample interval so the
-		// weight decay can be scaled to the actual sampling rate
 		if (this.samples.length > 0) {
-			const prev = this.samples[this.samples.length - 1]!;
-			const interval = time - prev.time;
-			if (interval > 0 && interval < 200) {
-				this.estimatedIntervalMs = this.estimatedIntervalMs * 0.7 + interval * 0.3;
+			const previous = this.samples[this.samples.length - 1]!;
+
+			const interval = time - previous.time;
+
+			if ( interval > 0 && interval < 200 ) {
+				this.estimatedIntervalMs = this.estimatedIntervalMs * 0.7 +interval * 0.3;
 			}
 		}
-		this.samples.push({ x: point.x, y: point.y, time });
+
+		this.samples.push({x: point.x, y: point.y, time,});
+
 		if (this.samples.length > MAX_SAMPLES) {
 			this.samples.shift();
 		}
+
 		this.lastPressure = point.pressure;
 	}
 
-	/** Return 0-3 predicted points extending beyond the last real sample. */
+	/**
+	 * Return predicted points extending beyond the newest real sample.
+	 */
 	predict(): Point[] {
-		if (this.samples.length < 2) {
+		if ( this.samples.length < 2 ) {
 			return [];
 		}
 
-		// Weighted least-squares linear fit on x(t) and y(t) independently,
-		// plus the higher-order sums needed for a parallel quadratic fit.
-		// Weights decay exponentially: newer samples have much higher weight.
-		// The decay constant scales with the observed sample interval so the
-		// fit behaves consistently on both input paths:
-		//   - pointerrawupdate (~4ms): decay ≈ 8ms → several samples within
-		//     one half-life, smooth fit
-		//   - pointermove fallback (~16.7ms at 60Hz): decay ≈ 8ms → only the
-		//     most recent 1-2 samples carry weight, so stationary samples
-		//     from before the pen started moving drop out after one frame
-		//     instead of anchoring the velocity estimate near zero.
-		const decay = Math.max(8, this.estimatedIntervalMs * 0.5);
 		const newest = this.samples[this.samples.length - 1]!;
+
+		/*
+		 * ------------------------------------------------------------
+		 * 1. ESTIMATE VELOCITY
+		 * ------------------------------------------------------------
+		 *
+		 * Weighted linear regression over recent samples.
+		 *
+		 * Newer samples receive exponentially more weight.
+		 */
+
+		const decay = Math.max( 8,this.estimatedIntervalMs * 0.75 );
+
 		let sumW = 0;
 		let sumWT = 0;
 		let sumWT2 = 0;
-		// sums for the quadratic fit x(t) = x0 + vx*t + 0.5*ax*t^2
-		let sumWT3 = 0;
-		let sumWT4 = 0;
+
 		let sumWX = 0;
 		let sumWTX = 0;
-		let sumWT2X = 0;
+
 		let sumWY = 0;
 		let sumWTY = 0;
-		let sumWT2Y = 0;
 
-		for (let i = 0; i < this.samples.length; i++) {
-			const s = this.samples[i]!;
-			const age = newest.time - s.time;
-			const w = Math.exp(-age / decay);
-			const t = s.time - newest.time; // negative for older samples
-			const t2 = t * t;
+		for ( let i = 0;i < this.samples.length; i++) {
+			const sample = this.samples[i]!;
 
-			sumW += w;
-			sumWT += w * t;
-			sumWT2 += w * t2;
-			sumWT3 += w * t2 * t;
-			sumWT4 += w * t2 * t2;
-			sumWX += w * s.x;
-			sumWTX += w * t * s.x;
-			sumWT2X += w * t2 * s.x;
-			sumWY += w * s.y;
-			sumWTY += w * t * s.y;
-			sumWT2Y += w * t2 * s.y;
+			const age = newest.time - sample.time;
+
+			const weight = Math.exp(-age / decay);
+
+			/*
+			 * t = 0 at newest sample.
+			 * Older samples have negative t.
+			 */
+			const t = sample.time -newest.time;
+
+			sumW += weight;
+			sumWT += weight * t;
+			sumWT2 += weight * t * t;
+
+			sumWX += weight * sample.x;
+
+			sumWTX += weight * t * sample.x;
+
+			sumWY += weight * sample.y;
+
+			sumWTY += weight * t *sample.y;
 		}
 
-		// Solve for vx, vy in: x(t) = x0 + vx*t  (t=0 at newest sample)
-		const det = sumW * sumWT2 - sumWT * sumWT;
-		if (Math.abs(det) < 1e-9) {
+		const determinant = sumW * sumWT2 - sumWT * sumWT;
+
+		if ( Math.abs(determinant) < 1e-9 ) {
 			return [];
 		}
 
-		const vx = (sumW * sumWTX - sumWT * sumWX) / det;
-		const vy = (sumW * sumWTY - sumWT * sumWY) / det;
+		const rawVx = ( sumW * sumWTX - sumWT * sumWX) /determinant;
 
-		const speed = Math.sqrt(vx * vx + vy * vy);
-		if (speed < this.config.minVelocity) {
+		const rawVy = ( sumW * sumWTY - sumWT * sumWY) /determinant;
+
+		const rawSpeed = Math.hypot(rawVx,rawVy);
+
+		if ( rawSpeed < this.config.minVelocity ) {
 			return [];
 		}
 
-		// --- confidence factors ------------------------------------------------
-		// Each factor ∈ [0,1]; their product scales the prediction distance and
-		// sharpens the ease-out. Straight clean strokes stay near 1; curves,
-		// corners, jittery speed, and deceleration pull it down.
-		const straightness = this.computeStraightness(vx, vy, sumW, sumWT, sumWT2, sumWX, sumWTX, sumWY, sumWTY, det);
-		const { directionConsistency, cornerDamp } = this.computeDirectionConsistency();
-		const speedStability = this.computeSpeedStability();
-		const { ax, ay, decelDamp } = this.computeAcceleration(
-			sumW, sumWT, sumWT2, sumWT3, sumWT4,
-			sumWX, sumWTX, sumWT2X, sumWY, sumWTY, sumWT2Y,
-			vx, vy, speed,
-		);
+		/*
+		 * ------------------------------------------------------------
+		 * 2. ANALYZE RECENT MOTION
+		 * ------------------------------------------------------------
+		 */
 
-		const confidence = this.clamp01(straightness * directionConsistency * speedStability * decelDamp * cornerDamp);
+		const directionInfo = this.computeDirectionInfo();
 
-		// Damping: reduce prediction as speed decreases toward MIN_VELOCITY
-		const dampFactor = Math.min(1, (speed - this.config.minVelocity) / (this.config.minVelocity * 3));
-		const clampedSpeed = speed * dampFactor;
+		const speedInfo = this.computeSpeedInfo();
 
-		// Clamp prediction distance: at most predictionMs of travel, and never
-		// more than a per-call limit that scales with predictionMs so the
-		// "Prediction distance" setting has headroom at higher values
-		// (2.4 px/ms ≈ a fast flick; 2.4 * predictionMs caps the overshoot).
-		const maxDistancePx = Math.min(2.4 * this.config.predictionMs, 120);
-		const maxDistance = clampedSpeed * this.config.predictionMs;
-		// confidence scales the distance: straight strokes keep ~all of it,
-		// curves/corners/deceleration pull it back to prevent overshoot.
-		const actualDistance = Math.min(maxDistance, maxDistancePx) * confidence;
+		/*
+		 * ------------------------------------------------------------
+		 * 3. ADAPTIVELY SMOOTH VELOCITY
+		 * ------------------------------------------------------------
+		 *
+		 * On straight motion:
+		 *   more smoothing for stability.
+		 *
+		 * During turns:
+		 *   respond more quickly.
+		 */
 
-		const dirX = speed > 0 ? vx / speed : 0;
-		const dirY = speed > 0 ? vy / speed : 0;
+		const turnResponse = 1 - directionInfo.consistency;
+		const smoothing = this.lerp( VELOCITY_SMOOTH_STRAIGHT, VELOCITY_SMOOTH_TURNING, turnResponse );
 
-		// Blend linear (tangent) and quadratic (curve-following) extrapolation
-		// based on straightness: clean lines use the tangent, gentle curves
-		// follow the curvature so the tail doesn't fly off the arc.
-		const curveBlend = this.smoothstep(BLEND_LOW, BLEND_HIGH, straightness); // 1=line, 0=curve
+		if ( !this.hasFilteredVelocity ) {
+			this.filteredVx = rawVx;
 
-		// Adaptive ease-out: high confidence extends gently (more lag hiding);
-		// low confidence retracts quickly (less overshoot at corners/stops).
-		const easeSharpness = this.lerp(EASE_GENTLE, EASE_STEEP, 1 - confidence);
+			this.filteredVy = rawVy;
 
-		const stepMs = this.config.predictionMs / PREDICTION_STEPS;
+			this.hasFilteredVelocity = true;
+		} else {
+			this.filteredVx += ( rawVx - this.filteredVx ) * smoothing;
+
+			this.filteredVy += ( rawVy - this.filteredVy) * smoothing;
+		}
+
+		const vx =this.filteredVx;
+		const vy =this.filteredVy;
+
+		const speed = Math.hypot( vx, vy);
+
+		if ( speed < this.config.minVelocity ) {
+			return [];
+		}
+
+		/*
+		 * ------------------------------------------------------------
+		 * 4. DECELERATION DAMPING
+		 * ------------------------------------------------------------
+		 */
+
+		const decelDamp = this.computeDecelerationDamp( speedInfo.accelerationAlongDirection, speed );
+
+		/*
+		 * ------------------------------------------------------------
+		 * 5. CONFIDENCE
+		 * ------------------------------------------------------------
+		 *
+		 * This is intentionally an additive weighted confidence instead
+		 * of multiplying several factors.
+		 *
+		 * Multiplication caused mildly-imperfect signals to collapse
+		 * prediction too aggressively.
+		 */
+
+		const confidence = this.clamp01(
+				CONFIDENCE_FLOOR +
+				directionInfo.consistency * 0.30 +
+				directionInfo.cornerDamp * 0.25 +
+				speedInfo.stability * 0.15 +
+				decelDamp * 0.15
+			);
+
+		/*
+		 * ------------------------------------------------------------
+		 * 6. SPEED DAMPING NEAR STOP
+		 * ------------------------------------------------------------
+		 */
+
+		const speedRamp =
+			this.clamp01(
+				( speed -this.config.minVelocity) /
+				( this.config.minVelocity * 2 )
+			);
+		const dampedSpeed = speed * speedRamp;
+
+		/*
+		 * ------------------------------------------------------------
+		 * 7. PREDICTION DISTANCE
+		 * ------------------------------------------------------------
+		 */
+
+		const unclampedDistance = dampedSpeed * this.config.predictionMs;
+
+		const absoluteMaxDistance = Math.min( 2.4 * this.config.predictionMs, 120 );
+
+		const predictionDistance = Math.min( unclampedDistance, absoluteMaxDistance ) * confidence;
+
+		if ( predictionDistance < 0.01 ) {
+			return [];
+		}
+
+		/*
+		 * ------------------------------------------------------------
+		 * 8. CURVATURE
+		 * ------------------------------------------------------------
+		 *
+		 * Instead of a quadratic x/y fit, we estimate the recent angular
+		 * turning rate and rotate the velocity direction over time.
+		 *
+		 * This is generally more stable for drawing because human pen
+		 * strokes are naturally lines and arcs rather than constant
+		 * Cartesian acceleration trajectories.
+		 */
+
+		let turnRate = directionInfo.turnRate;
+
+		turnRate = Math.max( -MAX_TURN_RATE, Math.min( MAX_TURN_RATE, turnRate ));
+
+		/*
+		 * Curvature is suppressed when confidence is low.
+		 */
+		const curveScale = this.clamp01(
+				( confidence - MIN_CURVE_CONFIDENCE ) /
+				( 1 - MIN_CURVE_CONFIDENCE)
+			);
+
+		turnRate *=curveScale * directionInfo.curveConfidence;
+
+		/*
+		 * ------------------------------------------------------------
+		 * 9. GENERATE PREDICTION POINTS
+		 * ------------------------------------------------------------
+		 */
+
+		const baseAngle = Math.atan2( vy, vx );
+
 		const points: Point[] = [];
-		for (let i = 1; i <= PREDICTION_STEPS; i++) {
-			const t = i * stepMs;
-			const frac = t / this.config.predictionMs;
-			// Ease-out: prediction tapers off rather than extending at full speed.
-			// easedFrac = 1 - (1 - frac)^easeSharpness, generalizing the original
-			// frac*(2-frac) (which is the easeSharpness=2 case).
-			const easedFrac = 1 - Math.pow(1 - frac, easeSharpness);
-			// linear displacement along the velocity direction
-			const linDx = dirX * actualDistance * easedFrac;
-			const linDy = dirY * actualDistance * easedFrac;
-			// quadratic displacement: 0.5*a*t^2 adds curvature so the tail bends
-			// along the observed arc instead of leaving on the tangent.
-			const half = 0.5;
-			const quadDx = linDx + half * ax * t * t;
-			const quadDy = linDy + half * ay * t * t;
-			points.push({
-				x: newest.x + this.lerp(quadDx, linDx, curveBlend),
-				y: newest.y + this.lerp(quadDy, linDy, curveBlend),
-				pressure: this.lastPressure,
-			});
-		}
 
+		for ( let i = 1; i <= PREDICTION_STEPS; i++ ) {
+			const fraction = i / PREDICTION_STEPS;
+
+			const time = this.config.predictionMs * fraction;
+
+			/*
+			 * Ease-out.
+			 *
+			 * High confidence = longer tail.
+			 * Low confidence = retract earlier.
+			 */
+			const easePower = this.lerp( 4.0, 1.7, confidence);
+
+			const easedFraction = 1 - Math.pow( 1 - fraction, easePower);
+
+			const allowedDistance = predictionDistance * easedFraction;
+
+			/*
+			 * Rotate direction over the prediction horizon.
+			 */
+			let angleOffset = turnRate * time;
+			angleOffset = Math.max( -MAX_TOTAL_TURN, Math.min(MAX_TOTAL_TURN, angleOffset));
+
+			const angle = baseAngle + angleOffset;
+			let dx = Math.cos(angle) * allowedDistance;
+			let dy = Math.sin(angle) * allowedDistance;
+
+			/*
+			 * Hard final clamp.
+			 *
+			 * This guarantees that no curvature or future tuning change
+			 * can extend the predicted point farther than intended.
+			 */
+			const actualDistance = Math.hypot( dx, dy );
+
+			if ( actualDistance > allowedDistance && actualDistance > 1e-6 ) {
+				const scale = allowedDistance / actualDistance;
+				dx *= scale;
+				dy *= scale;
+			}
+			points.push({ x: newest.x + dx, y: newest.y + dy, pressure: this.lastPressure, });
+		}
 		return points;
 	}
 
 	/**
-	 * Straightness: how well the linear fit explains the samples.
-	 * 1 / (1 + k * weightedResidual), where the residual is the weighted mean
-	 * squared error of the linear fit. Collinear samples → ~1; curved or
-	 * scattered samples → <1.
-	 */
-	private computeStraightness(
-		vx: number, vy: number,
-		sumW: number, sumWT: number, sumWT2: number,
-		sumWX: number, sumWTX: number, sumWY: number, sumWTY: number,
-		det: number,
-	): number {
-		if (this.samples.length < 2 || Math.abs(det) < 1e-9) {
-			return 1;
-		}
-		const newest = this.samples[this.samples.length - 1]!;
-		const decay = Math.max(8, this.estimatedIntervalMs * 0.5);
-		// intercepts at t=0 (the newest sample time)
-		const x0 = (sumWT2 * sumWX - sumWT * sumWTX) / det;
-		const y0 = (sumWT2 * sumWY - sumWT * sumWTY) / det;
-		let residual = 0;
-		let totalW = 0;
-		for (let i = 0; i < this.samples.length; i++) {
-			const s = this.samples[i]!;
-			const age = newest.time - s.time;
-			const w = Math.exp(-age / decay);
-			const t = s.time - newest.time;
-			const ex = s.x - (x0 + vx * t);
-			const ey = s.y - (y0 + vy * t);
-			residual += w * (ex * ex + ey * ey);
-			totalW += w;
-		}
-		if (totalW < 1e-9) {
-			return 1;
-		}
-		const meanResidual = residual / totalW;
-		return 1 / (1 + STRAIGHTNESS_K * meanResidual);
-	}
-
-	/**
-	 * Direction consistency and sharp-corner detection from consecutive
-	 * segment vectors. Consistency is the product of cosines of turn angles
-	 * between consecutive segments (1 = perfectly straight). cornerDamp
-	 * drops sharply when the most recent turn exceeds the threshold.
-	 */
-	private computeDirectionConsistency(): { directionConsistency: number; cornerDamp: number } {
-		const n = this.samples.length;
-		if (n < 3) {
-			return { directionConsistency: 1, cornerDamp: 1 };
-		}
-		const dirs: Array<{ x: number; y: number }> = [];
-		for (let i = 1; i < n; i++) {
-			const a = this.samples[i - 1]!;
-			const b = this.samples[i]!;
-			const dx = b.x - a.x;
-			const dy = b.y - a.y;
-			const len = Math.sqrt(dx * dx + dy * dy);
-			if (len > 1e-6) {
-				dirs.push({ x: dx / len, y: dy / len });
-			}
-		}
-		if (dirs.length < 2) {
-			return { directionConsistency: 1, cornerDamp: 1 };
-		}
-		let consistency = 1;
-		for (let i = 1; i < dirs.length; i++) {
-			const p = dirs[i - 1]!;
-			const q = dirs[i]!;
-			const dot = this.clamp01(p.x * q.x + p.y * q.y);
-			consistency *= dot;
-		}
-		// cornerDamp uses the most recent turn for responsiveness.
-		const lastP = dirs[dirs.length - 2]!;
-		const lastQ = dirs[dirs.length - 1]!;
-		const lastDot = this.clamp01(lastP.x * lastQ.x + lastP.y * lastQ.y);
-		const lastTurn = Math.acos(lastDot);
-		let cornerDamp = 1;
-		if (lastTurn > CORNER_TURN_THRESHOLD) {
-			const span = Math.max(1e-6, Math.PI - CORNER_TURN_THRESHOLD);
-			const t = this.clamp01((lastTurn - CORNER_TURN_THRESHOLD) / span);
-			cornerDamp = 1 - t * (1 - CORNER_DAMP_FLOOR);
-		}
-		return { directionConsistency: consistency, cornerDamp };
-	}
-
-	/**
-	 * Speed stability: 1 / (1 + k * coefficientOfVariation) of the per-sample
-	 * speeds. Steady speed → ~1; speed surging or fluctuating → <1.
-	 */
-	private computeSpeedStability(): number {
-		const n = this.samples.length;
-		if (n < 3) {
-			return 1;
-		}
-		const speeds: number[] = [];
-		for (let i = 1; i < n; i++) {
-			const a = this.samples[i - 1]!;
-			const b = this.samples[i]!;
-			const dt = b.time - a.time;
-			if (dt <= 0) {
-				continue;
-			}
-			const dx = b.x - a.x;
-			const dy = b.y - a.y;
-			speeds.push(Math.sqrt(dx * dx + dy * dy) / dt);
-		}
-		if (speeds.length < 2) {
-			return 1;
-		}
-		let mean = 0;
-		for (const s of speeds) {
-			mean += s;
-		}
-		mean /= speeds.length;
-		if (mean < 1e-6) {
-			return 1;
-		}
-		let variance = 0;
-		for (const s of speeds) {
-			const d = s - mean;
-			variance += d * d;
-		}
-		variance /= speeds.length;
-		const cv = Math.sqrt(variance) / mean;
-		return 1 / (1 + SPEED_STABILITY_K * cv);
-	}
-
-	/**
-	 * Quadratic fit (acceleration ax, ay) via weighted least squares on
-	 * x(t) = x0 + vx*t + 0.5*ax*t^2, plus deceleration damping. decelDamp is 1
-	 * when accelerating/constant and drops toward 0 when decelerating, so the
-	 * tail doesn't run past a stopping point or into a corner.
+	 * Analyze recent direction changes.
 	 *
-	 * Solves the 3x3 normal equations for each axis with Cramer's rule. Falls
-	 * back to zero acceleration if the system is ill-conditioned.
+	 * Returns:
+	 *
+	 * consistency:
+	 *   1 = very straight
+	 *   0 = severe direction changes
+	 *
+	 * cornerDamp:
+	 *   specifically responds to the most recent turn
+	 *
+	 * turnRate:
+	 *   signed angular velocity in radians/ms
+	 *
+	 * curveConfidence:
+	 *   how trustworthy the curvature estimate is
 	 */
-	private computeAcceleration(
-		sumW: number, sumWT: number, sumWT2: number, sumWT3: number, sumWT4: number,
-		sumWX: number, sumWTX: number, sumWT2X: number,
-		sumWY: number, sumWTY: number, sumWT2Y: number,
-		vx: number, vy: number, speed: number,
-	): { ax: number; ay: number; decelDamp: number } {
-		// normal matrix for x(t) = x0 + c1*t + c2*t^2 (c1 = vx, c2 = 0.5*ax):
-		//   [ sumW    sumWT   sumWT2  ] [ x0 ]   [ sumWX   ]
-		//   [ sumWT   sumWT2  sumWT3  ] [ c1 ] = [ sumWTX  ]
-		//   [ sumWT2  sumWT3  sumWT4  ] [ c2 ]   [ sumWT2X ]
-		const det3 = sumW * (sumWT2 * sumWT4 - sumWT3 * sumWT3)
-			- sumWT * (sumWT * sumWT4 - sumWT3 * sumWT2)
-			+ sumWT2 * (sumWT * sumWT3 - sumWT2 * sumWT2);
-		let ax = 0;
-		let ay = 0;
-		if (Math.abs(det3) > 1e-9) {
-			// Cramer's rule for c2 (column 3 replaced by the RHS).
-			const detC2x = sumW * (sumWT2 * sumWT2X - sumWT3 * sumWTX)
-				- sumWT * (sumWT * sumWT2X - sumWT3 * sumWX)
-				+ sumWT2 * (sumWT * sumWTX - sumWT2 * sumWX);
-			const detC2y = sumW * (sumWT2 * sumWT2Y - sumWT3 * sumWTY)
-				- sumWT * (sumWT * sumWT2Y - sumWT3 * sumWY)
-				+ sumWT2 * (sumWT * sumWTY - sumWT2 * sumWY);
-			ax = 2 * (detC2x / det3);
-			ay = 2 * (detC2y / det3);
+	private computeDirectionInfo(): {
+		consistency: number;
+		cornerDamp: number;
+		turnRate: number;
+		curveConfidence: number;
+	} {
+		const n = this.samples.length;
+
+		if (n < 3) {
+			return {
+				consistency: 1,
+				cornerDamp: 1,
+				turnRate: 0,
+				curveConfidence: 0,
+			};
 		}
-		// decelDamp: project acceleration onto the velocity direction.
-		// accelAlongDir > 0 = speeding up, < 0 = slowing down.
-		let decelDamp = 1;
-		if (speed > 1e-6) {
-			const accelAlongDir = (ax * vx + ay * vy) / speed;
-			if (accelAlongDir < 0) {
-				decelDamp = this.clamp01(1 + DECEL_K * (accelAlongDir / speed));
+
+		interface Segment {
+			x: number;
+			y: number;
+			length: number;
+			time: number;
+		}
+
+		const segments: Segment[] = [];
+
+		for ( let i = 1; i < n; i++) {
+			const a = this.samples[i - 1]!;
+			const b = this.samples[i]!;
+
+			const dx = b.x - a.x;
+			const dy = b.y - a.y;
+
+			const length = Math.hypot( dx, dy );
+
+			const dt = b.time - a.time;
+
+			if ( length > 1e-6 && dt > 0) {
+				segments.push({
+					x: dx / length,
+					y:dy / length,
+					length,
+					time: dt,
+				});
 			}
 		}
-		return { ax, ay, decelDamp };
+
+		if ( segments.length < 2 ) {
+			return {
+				consistency: 1,
+				cornerDamp: 1,
+				turnRate: 0,
+				curveConfidence: 0,
+			};
+		}
+
+		let weightedConsistency = 0;
+		let totalWeight = 0;
+
+		let weightedTurnRate = 0;
+		let totalTurnWeight = 0;
+
+		let lastTurn = 0;
+
+		for ( let i = 1; i < segments.length; i++ ) {
+			const previous = segments[i - 1]!;
+
+			const current = segments[i]!;
+
+			const rawDot = this.clamp(
+					previous.x * current.x +
+					previous.y * current.y,
+					-1,
+					1
+				);
+
+			const cross = previous.x * current.y - previous.y * current.x;
+
+			const turn = Math.atan2( cross, rawDot );
+
+			const absTurn = Math.abs( turn );
+
+			/*
+			 * Convert turn angle into consistency.
+			 *
+			 * Small turns remain near 1.
+			 */
+			const turnConsistency = Math.cos( Math.min( Math.PI, absTurn ) * 0.5 );
+
+			/*
+			 * Newer direction changes matter more.
+			 */
+			const weight = i;
+
+			weightedConsistency += turnConsistency * weight;
+			totalWeight += weight;
+
+			const dt = Math.max( 1, ( previous.time + current.time ) * 0.5 );
+			const localTurnRate = turn / dt;
+
+			weightedTurnRate += localTurnRate * weight;
+
+			totalTurnWeight += weight;
+
+			if ( i === segments.length - 1 ) {
+				lastTurn = absTurn;
+			}
+		}
+
+		const consistency = totalWeight > 0 ? weightedConsistency / totalWeight: 1;
+
+		const turnRate = totalTurnWeight > 0 ? weightedTurnRate / totalTurnWeight: 0;
+
+		/*
+		 * Corner damping uses the newest turn because prediction needs
+		 * to react immediately when the pen changes direction.
+		 */
+		let cornerDamp = 1;
+
+		if ( lastTurn > TURN_START ) {
+			const normalizedTurn = this.clamp01( ( lastTurn - TURN_START ) / ( TURN_FULL - TURN_START ));
+			cornerDamp = 1 - normalizedTurn * (	1 - CORNER_DAMP_FLOOR );
+		}
+
+		/*
+		 * Curvature is more trustworthy when the recent turns are
+		 * reasonably consistent and not a sudden sharp corner.
+		 */
+		const curveConfidence = this.clamp01( consistency * cornerDamp);
+
+		return {
+			consistency,
+			cornerDamp,
+			turnRate,
+			curveConfidence,
+		};
 	}
 
-	/** Clamp a value to [0,1]. */
-	private clamp01(v: number): number {
-		return v < 0 ? 0 : v > 1 ? 1 : v;
+	/**
+	 * Analyze recent segment speeds and estimate acceleration along the
+	 * direction of travel.
+	 */
+	private computeSpeedInfo(): {
+		stability: number;
+		accelerationAlongDirection: number;
+	} {
+		const n = this.samples.length;
+
+		if (n < 3) {
+			return {
+				stability: 1,
+				accelerationAlongDirection: 0,
+			};
+		}
+
+		const speeds: Array<{ speed: number; time: number; }> = [];
+
+		for ( let i = 1; i < n; i++ ) {
+			const a = this.samples[i - 1]!;
+			const b = this.samples[i]!;
+
+			const dt = b.time - a.time;
+			if ( dt <= 0 ) { continue; }
+
+			const dx = b.x - a.x;
+			const dy =b.y - a.y;
+
+			const speed = Math.hypot( dx, dy ) / dt;
+			speeds.push({ speed, time: dt, });
+		}
+
+		if ( speeds.length < 2 ) {
+			return {
+				stability: 1,
+				accelerationAlongDirection: 0,
+			};
+		}
+
+		let mean = 0;
+		for ( const entry of speeds) {
+			mean +=	entry.speed;
+		}
+		mean /=	speeds.length;
+
+		let variance = 0;
+
+		for ( const entry of speeds) {
+			const delta = entry.speed -	mean;
+			variance +=	delta *	delta;
+		}
+
+		variance /=	speeds.length;
+
+		const standardDeviation = Math.sqrt( variance );
+
+		const coefficientOfVariation = mean > 1e-6 ? standardDeviation / mean: 0;
+
+		const stability = 1 / ( 1 +	SPEED_STABILITY_K *	coefficientOfVariation );
+
+		/*
+		 * Estimate acceleration from the first and last speed.
+		 *
+		 * This is intentionally simpler and more stable than fitting a
+		 * second-order polynomial through x/y coordinates.
+		 */
+		const first = speeds[0]!;
+
+		const last = speeds[ speeds.length - 1 ]!;
+
+		let totalDt = 0;
+
+		for ( let i = 1; i < this.samples.length; i++ ) {
+			const a = this.samples[i - 1]!;
+
+			const b = this.samples[i]!;
+
+			const dt = b.time - a.time;
+
+			if ( dt > 0) {
+				totalDt += dt;
+			}
+		}
+
+		const acceleration = totalDt > 0 ? ( last.speed - first.speed ) / totalDt : 0;
+
+		return { stability, accelerationAlongDirection:	acceleration, };
 	}
 
-	/** Linear interpolation from a to b by t (unclamped). */
-	private lerp(a: number, b: number, t: number): number {
-		return a + (b - a) * t;
+	/**
+	 * Convert negative acceleration into prediction damping.
+	 */
+	private computeDecelerationDamp(
+		acceleration: number,
+		speed: number
+	): number {
+		if ( acceleration >= 0 || speed <= 1e-6 ) {
+			return 1;
+		}
+
+		const normalizedDeceleration =
+			this.clamp01( (-acceleration * DECEL_K) / speed );
+
+		return ( 1 - normalizedDeceleration * (1 - DECEL_DAMP_FLOOR) );
 	}
 
-	/** Hermite smoothstep: 0 below edge0, 1 above edge1, smooth in between. */
-	private smoothstep(edge0: number, edge1: number, x: number): number {
-		const t = this.clamp01((x - edge0) / (edge1 - edge0));
-		return t * t * (3 - 2 * t);
-	}
-
-
-
-	/** Return the most recent real sample fed to the predictor, or undefined. */
+	/** Return the most recent real sample. */
 	lastSample(): Point | undefined {
-		if (this.samples.length === 0) {
+		if ( this.samples.length === 0 ) {
 			return undefined;
 		}
-		const s = this.samples[this.samples.length - 1]!;
-		return { x: s.x, y: s.y, pressure: this.lastPressure };
+
+		const sample = this.samples[ this.samples.length - 1 ]!;
+
+		return {
+			x: sample.x,
+			y: sample.y,
+			pressure: this.lastPressure,
+		};
 	}
 
-	/** Clear the sample buffer for a new stroke. */
+	/** Clear all prediction state for a new stroke. */
 	reset(): void {
 		this.samples.length = 0;
+
 		this.lastPressure = undefined;
+
+		this.estimatedIntervalMs = 16;
+
+		this.filteredVx = 0;
+		this.filteredVy = 0;
+
+		this.hasFilteredVelocity = false;
+	}
+
+	/** Clamp to [0, 1]. */
+	private clamp01( value: number ): number {
+		return this.clamp( value, 0, 1 );
+	}
+
+	/** Clamp to an arbitrary range. */
+	private clamp(
+		value: number,
+		min: number,
+		max: number
+	): number {
+		return value < min
+			? min
+			: value > max
+				? max
+				: value;
+	}
+
+	/** Linear interpolation. */
+	private lerp(
+		a: number,
+		b: number,
+		t: number
+	): number {
+		return ( a + ( b - a ) * t);
 	}
 }
