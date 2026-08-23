@@ -91,7 +91,7 @@ export const SIZE_STEP = 5;
 export const DEFAULT_ROTATE_SENSITIVITY = 3; // degrees per press
 export const DEFAULT_PREDICTION_DISTANCE_MS = 25;
 export const MIN_PREDICTION_DISTANCE_MS = 5;
-export const MAX_PREDICTION_DISTANCE_MS = 50;
+export const MAX_PREDICTION_DISTANCE_MS = 100;
 
 export const DEFAULT_PREDICTION_SENSITIVITY = 50; // slider 0–100
 export const MIN_PREDICTION_SENSITIVITY = 0;

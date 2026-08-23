@@ -32,6 +32,13 @@ export class PointerPredictor {
 	private readonly samples: Sample[] = [];
 	private lastPressure: number | undefined;
 	private config: PredictionConfig;
+	// rolling estimate of the inter-sample interval, used to scale the weight
+	// decay so the fit behaves consistently regardless of sampling rate:
+	// - pointerrawupdate (e.g. 4ms): short decay → fine smoothing window
+	// - pointermove fallback (60Hz, 16.7ms): short decay drops stale samples
+	//   fast enough that stationary samples (from before the pen started
+	//   moving) don't anchor the velocity estimate near zero
+	private estimatedIntervalMs = 16;
 
 	constructor(config?: PredictionConfig) {
 		this.config = { predictionMs: 25, minVelocity: 0.5, ...config };
@@ -44,6 +51,15 @@ export class PointerPredictor {
 
 	/** Feed one real pointer sample (document-space position + timestamp). */
 	addSample(point: Point, time: number): void {
+		// update the rolling estimate of the inter-sample interval so the
+		// weight decay can be scaled to the actual sampling rate
+		if (this.samples.length > 0) {
+			const prev = this.samples[this.samples.length - 1]!;
+			const interval = time - prev.time;
+			if (interval > 0 && interval < 200) {
+				this.estimatedIntervalMs = this.estimatedIntervalMs * 0.7 + interval * 0.3;
+			}
+		}
 		this.samples.push({ x: point.x, y: point.y, time });
 		if (this.samples.length > MAX_SAMPLES) {
 			this.samples.shift();
@@ -59,6 +75,15 @@ export class PointerPredictor {
 
 		// Weighted least-squares linear fit on x(t) and y(t) independently.
 		// Weights decay exponentially: newer samples have much higher weight.
+		// The decay constant scales with the observed sample interval so the
+		// fit behaves consistently on both input paths:
+		//   - pointerrawupdate (~4ms): decay ≈ 8ms → several samples within
+		//     one half-life, smooth fit
+		//   - pointermove fallback (~16.7ms at 60Hz): decay ≈ 8ms → only the
+		//     most recent 1-2 samples carry weight, so stationary samples
+		//     from before the pen started moving drop out after one frame
+		//     instead of anchoring the velocity estimate near zero.
+		const decay = Math.max(8, this.estimatedIntervalMs * 0.5);
 		const newest = this.samples[this.samples.length - 1]!;
 		let sumW = 0;
 		let sumWT = 0;
@@ -70,9 +95,8 @@ export class PointerPredictor {
 
 		for (let i = 0; i < this.samples.length; i++) {
 			const s = this.samples[i]!;
-			// Age in ms relative to newest sample; weight falls off with a ~30ms half-life
 			const age = newest.time - s.time;
-			const w = Math.exp(-age / 20);
+			const w = Math.exp(-age / decay);
 			const t = s.time - newest.time; // negative for older samples
 
 			sumW += w;

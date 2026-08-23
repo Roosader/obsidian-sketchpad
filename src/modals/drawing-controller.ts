@@ -234,11 +234,32 @@ export class DrawingController {
 		// use coalesced events for more fine-grained sampling on fast pointer movements
 		const coalesced = typeof event.getCoalescedEvents === 'function' ? event.getCoalescedEvents() : [];
 		const samples = coalesced.length > 0 ? coalesced : [event];
+		// Use performance.now() (not event.timeStamp) on this fallback path:
+		// on some platforms (Android WebView, some Linux setups) event.timeStamp
+		// can be 0 or a constant, which collapses the predictor's weighted fit to
+		// det=0 → predict() always returns []. performance.now() is guaranteed
+		// to advance monotonically across frames. Coalesced events within one
+		// pointermove share the timestamp, which is fine — the predictor gets
+		// temporal separation across frames.
+		const now = performance.now();
 		for (const sample of samples) {
-			this.deps.engine.appendPoint(this.deps.viewport.getPoint(sample));
+			const point = this.deps.viewport.getPoint(sample);
+			this.deps.engine.appendPoint(point);
+			this.predictor.addSample(point, now);
 		}
 		this.appendPredictedTail();
-		this.schedulePreview();
+		// Render immediately when there's headroom before vsync (same logic as
+		// handleRawPointerUpdate). Without this, the predicted tail is always
+		// deferred to rAF — and on the fallback path (no pointerrawupdate,
+		// Android/Linux), the next pointermove at the same vsync fires BEFORE
+		// the rAF, rolling back the prediction before it's ever rendered.
+		const now2 = performance.now();
+		if (now2 - this.lastPreviewDrawTime >= Math.max(4, this.frameIntervalMs * 0.6)) {
+			this.previewFrameRequested = false;
+			this.drawPreviewNow();
+		} else {
+			this.schedulePreview();
+		}
 	};
 
 	handlePointerUp = (event: PointerEvent): void => {

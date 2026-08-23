@@ -696,6 +696,17 @@ export default class SketchpadView extends ItemView {
 				this.cursorOverlay?.handlePointerMove(event.clientX, event.clientY, event.pointerType, event.buttons);
 			}
 			this.drawingController?.handlePointerMove(event);
+			// on the fallback path (no pointerrawupdate), forward the prediction
+			// offset to the cursor overlay after the predictor has computed it,
+			// matching what the raw-update handler does
+			if (!supportsRawPointerUpdate) {
+				const off = this.drawingController?.getCursorPredictionOffset();
+				if (off && (off.dx !== 0 || off.dy !== 0)) {
+					this.cursorOverlay?.setPredictionOffset(off.dx, off.dy);
+				} else if (off) {
+					this.cursorOverlay?.setPredictionOffset(0, 0);
+				}
+			}
 		});
 		this.registerDomEvent(this.canvas, 'pointerup', this.drawingController.handlePointerUp);
 		this.registerDomEvent(this.canvas, 'pointerleave', this.drawingController.handlePointerUp);
