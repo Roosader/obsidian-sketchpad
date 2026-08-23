@@ -77,6 +77,8 @@ export class CursorOverlay {
 	private readonly getZoom: () => number;
 	private readonly getToolSelected: () => boolean;
 	private readonly getIsTouchDrawing: () => boolean;
+	private readonly getHideCursorWhileDrawing: () => boolean;
+	private readonly getIsDrawing: () => boolean;
 
 	private rectLeft = 0;
 	private rectTop = 0;
@@ -102,12 +104,16 @@ export class CursorOverlay {
 		getZoom: () => number,
 		getToolSelected: () => boolean,
 		getIsTouchDrawing: () => boolean,
+		getHideCursorWhileDrawing: () => boolean,
+		getIsDrawing: () => boolean,
 	) {
 		this.getCurrentTool = getCurrentTool;
 		this.getToolSize = getToolSize;
 		this.getZoom = getZoom;
 		this.getToolSelected = getToolSelected;
 		this.getIsTouchDrawing = getIsTouchDrawing;
+		this.getHideCursorWhileDrawing = getHideCursorWhileDrawing;
+		this.getIsDrawing = getIsDrawing;
 
 		this.canvas = panel.createEl('canvas', { cls: 'sketchpad-cursor-overlay' });
 		this.ctx = this.canvas.getContext('2d')!;
@@ -191,14 +197,19 @@ export class CursorOverlay {
 		if (!this.getToolSelected()) {
 			return false;
 		}
-
+		let shown: boolean;
 		if (this.lastPointerType === 'touch') {
 			// only show the custom cursor while actively touch-drawing (one
 			// finger with touch-to-draw enabled); hide during touch gestures
-			return this.isMarkingTool() && this.getIsTouchDrawing();
+			shown = this.isMarkingTool() && this.getIsTouchDrawing();
+		} else {
+			// true for marking tools, or when using other tools with a pen
+			shown = this.isMarkingTool() || (this.lastPointerType === 'pen' && (this.lastButtons & 1) !== 0);
 		}
-		// true for marking tools, or when using other tools with a pen
-		return this.isMarkingTool() || (this.lastPointerType === 'pen' && (this.lastButtons & 1) !== 0);
+		if (shown && this.isMarkingTool() && this.getHideCursorWhileDrawing() && this.getIsDrawing()) {
+			return false;
+		}
+		return shown;
 	}
 
 	// true while the Wacom stylus eraser end is in contact (buttons bit 5)

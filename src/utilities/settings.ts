@@ -113,6 +113,19 @@ export class SketchpadSettingTab extends PluginSettingTab
             });
 
         new Setting(containerEl)
+            .setName('Hide cursor while drawing')
+            .setDesc('Hides the cursor while a drawing tool (pencil, pen, brush, eraser) is actively drawing. The cursor remains visible while hovering.')
+            .addToggle((toggle) => {
+                toggle
+                    .setValue(this.plugin.hideCursorWhileDrawing)
+                    .onChange(async (value) => {
+                        this.plugin.hideCursorWhileDrawing = value;
+                        await this.plugin.saveToolSettings();
+                        this.plugin.notifyCursorSettingsChanged();
+                    });
+            });
+
+        new Setting(containerEl)
             .setName('Pointer prediction')
             .setHeading();
 

@@ -458,6 +458,8 @@ export default class SketchpadView extends ItemView {
 			() => this.viewport?.view.zoom ?? 1,
 			() => this.toolSelected,
 			() => this.viewport?.isTouchDrawActive() ?? false,
+			() => this.plugin.hideCursorWhileDrawing,
+			() => this.engine?.isDrawing() ?? false,
 		);
 		const cursorResizeObserver = new ResizeObserver(() => this.cursorOverlay?.resize());
 		cursorResizeObserver.observe(this.canvasPanel);
@@ -623,6 +625,7 @@ export default class SketchpadView extends ItemView {
 
 		// when available, raw pointer updates drive the custom cursor at native rate
 		const supportsRawPointerUpdate = typeof window !== 'undefined' && 'onpointerrawupdate' in window;
+		new Notice(`Sketchpad is using ${supportsRawPointerUpdate ? 'raw pointer updates' : 'pointermove events'} for cursor tracking.`);
 
 		// panel-level pointer routing (handles pen drawing that starts off-canvas).
 		this.registerDomEvent(this.canvasPanel, 'pointerdown', (event) => {
@@ -689,6 +692,8 @@ export default class SketchpadView extends ItemView {
 		this.registerDomEvent(this.canvas, 'pointerdown', (event) => {
 			this.cursorOverlay?.handlePointerDown(event.pointerType);
 			this.drawingController.handlePointerDown(event);
+			//hide the cursor while drawing if the user opted in
+			this.cursorOverlay?.refresh();
 		});
 		this.registerDomEvent(this.canvas, 'pointerenter', this.drawingController.handlePointerEnter);
 		this.registerDomEvent(this.canvas, 'pointermove', (event) => {
@@ -708,7 +713,11 @@ export default class SketchpadView extends ItemView {
 				}
 			}
 		});
-		this.registerDomEvent(this.canvas, 'pointerup', this.drawingController.handlePointerUp);
+		this.registerDomEvent(this.canvas, 'pointerup', (event) => {
+			this.drawingController.handlePointerUp(event);
+			//restore the cursor if it was hidden while drawing
+			this.cursorOverlay?.refresh();
+		});
 		this.registerDomEvent(this.canvas, 'pointerleave', this.drawingController.handlePointerUp);
 		this.registerDomEvent(this.canvas, 'pointercancel', this.drawingController.handlePointerUp);
 		this.registerDomEvent(window, 'keydown', this.hotkeyController.handleKeyDown);
@@ -1144,6 +1153,11 @@ export default class SketchpadView extends ItemView {
 	 *  them to the live drawing controller without restarting the stroke. */
 	public updatePredictionConfig(): void {
 		this.drawingController?.updatePredictionConfig();
+	}
+
+	// called when the user changes cursor-overlay settings
+	public updateCursorConfig(): void {
+		this.cursorOverlay?.refresh();
 	}
 
 	private handleGridToggle(enabled: boolean): void {

@@ -17,6 +17,8 @@ interface SketchpadPluginData {
 	pointerPredictionDistanceMs?: number;
 	pointerPredictionSensitivity?: number;
 
+	hideCursorWhileDrawing?: boolean;
+
 	leftSidebarPos?: { x: number; y: number };
 	rightSidebarPos?: { x: number; y: number };
 
@@ -57,6 +59,7 @@ export default class SketchpadPlugin extends Plugin {
 	pointerPredictionEnabled = true;
 	pointerPredictionDistanceMs = DEFAULT_PREDICTION_DISTANCE_MS;
 	pointerPredictionSensitivity = DEFAULT_PREDICTION_SENSITIVITY;
+	hideCursorWhileDrawing = false;
 	leftSidebarPos: { x: number; y: number } | null = null;
 	rightSidebarPos: { x: number; y: number } | null = null;
 	toolHotkeys: Partial<Record<ViewTool, string>> = { ...DEFAULT_TOOL_HOTKEYS };
@@ -91,6 +94,7 @@ export default class SketchpadPlugin extends Plugin {
 		this.pointerPredictionEnabled = data?.pointerPredictionEnabled ?? true;
 		this.pointerPredictionDistanceMs = sanitizePredictionDistance(data?.pointerPredictionDistanceMs, DEFAULT_PREDICTION_DISTANCE_MS);
 		this.pointerPredictionSensitivity = sanitizePredictionSensitivity(data?.pointerPredictionSensitivity, DEFAULT_PREDICTION_SENSITIVITY);
+		this.hideCursorWhileDrawing = data?.hideCursorWhileDrawing ?? false;
 		this.leftSidebarPos = sanitizePanelPos(data?.leftSidebarPos);
 		this.rightSidebarPos = sanitizePanelPos(data?.rightSidebarPos);
 		this.toolHotkeys = { ...DEFAULT_TOOL_HOTKEYS, ...(data?.toolHotkeys ?? {}) };
@@ -199,6 +203,7 @@ export default class SketchpadPlugin extends Plugin {
 			pointerPredictionEnabled: this.pointerPredictionEnabled,
 			pointerPredictionDistanceMs: this.pointerPredictionDistanceMs,
 			pointerPredictionSensitivity: this.pointerPredictionSensitivity,
+			hideCursorWhileDrawing: this.hideCursorWhileDrawing,
 			leftSidebarPos: this.leftSidebarPos ?? undefined,
 			rightSidebarPos: this.rightSidebarPos ?? undefined,
 			toolHotkeys: this.toolHotkeys,
@@ -234,6 +239,13 @@ export default class SketchpadPlugin extends Plugin {
 	notifyPredictionSettingsChanged(): void {
 		for (const leaf of this.app.workspace.getLeavesOfType(SKETCHPAD_VIEW_TYPE)) {
 			(leaf.view as SketchpadView).updatePredictionConfig();
+		}
+	}
+
+	// Push cursor-overlay settings to every open sketchpad view
+	notifyCursorSettingsChanged(): void {
+		for (const leaf of this.app.workspace.getLeavesOfType(SKETCHPAD_VIEW_TYPE)) {
+			(leaf.view as SketchpadView).updateCursorConfig();
 		}
 	}
 
