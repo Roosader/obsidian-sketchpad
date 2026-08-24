@@ -137,9 +137,7 @@ export class SketchpadSettingTab extends PluginSettingTab
         new Setting(containerEl)
             .setName('Enable pointer prediction')
             .setDesc(createFragment((frag) => {
-                frag.appendText('Extends the live stroke tip slightly ahead using the browser\'s predicted pointer positions, hiding input lag while drawing. Predicted points are never saved into the stroke.');
-                frag.createEl('br');
-                frag.appendText('Disable if the stroke tip feels unstable or overshoots on quick movements.');
+                frag.appendText('Extends the live stroke preview slightly ahead to mask input lag while drawing. May cause visual artifacts on fast strokes. Stroke predictions are never saved to the canvas.');
             }))
             .addToggle((toggle) => {
                 toggle
@@ -158,7 +156,7 @@ export class SketchpadSettingTab extends PluginSettingTab
 
         distanceSetting = new Setting(containerEl)
             .setName('Prediction distance')
-            .setDesc('How far ahead of the cursor the stroke tip renders. Higher hides more input lag but may overshoot on fast strokes.')
+            .setDesc('How far ahead of the real stroke the prediction renders. Higher setting hides more input lag but may overshoot on fast strokes.')
             .addSlider((slider) => {
                 distanceSlider = slider;
                 slider
@@ -173,7 +171,7 @@ export class SketchpadSettingTab extends PluginSettingTab
 
         predSensitivitySetting = new Setting(containerEl)
             .setName('Prediction sensitivity')
-            .setDesc('How readily prediction engages on slow strokes. Lower (Low) is more stable at rest; higher (High) feels more responsive on slow lines.')
+            .setDesc('How readily prediction engages in response to drawing speed. Lower setting is more stable, higher setting feels more responsive on slow lines.')
             .addSlider((slider) => {
                 sensitivitySlider = slider;
                 slider

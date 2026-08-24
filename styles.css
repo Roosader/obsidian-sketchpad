@@ -135,7 +135,7 @@ button.sketchpad-tool {
 .sketchpad-pen-active,
 .sketchpad-brush-active,
 .sketchpad-eraser-active {
-	/*cursor: none;*/
+	cursor: none;
 }
 .sketchpad-eyedropper-active
 {

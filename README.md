@@ -55,6 +55,7 @@ The layers can be reordered except for the Paper layer which always remains at t
     - Each layer is a png image that can be accessed by simply unzipping the `.ora` file.
 - Supports undo/redo upto 50 counts.
 - Supports autosave in 5-30 minutes interval.
+- Supports pointer/stroke prediction.
 - Supports touch controls.
     - One-finger touch to pan.
     - Two-finger pinch to rotate, zoom, and pan.

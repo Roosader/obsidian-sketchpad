@@ -26,7 +26,18 @@ export interface PredictionConfig {
 
 // Minimum confidence. Prevents several mildly-bad signals from multiplying
 // together and completely eliminating prediction.
-const CONFIDENCE_FLOOR = 0.15;
+// Base confidence floor. Prevents mildly-bad signals from eliminating
+// prediction. This is the floor for straight-line strokes; at sharp
+// corners the effective floor is lowered dynamically (see predict()).
+const CONFIDENCE_FLOOR_STRAIGHT = 0.15;
+// Minimum confidence floor at sharp corners (cornerDamp ≈ 0).
+const CONFIDENCE_FLOOR_CORNER = 0.02;
+
+// Instant-stop detection: if the newest sample-pair speed drops below this
+// fraction of the regression speed, the pen is stopping abruptly and
+// prediction is clamped to a small multiple of the last displacement.
+const STOP_SPEED_RATIO = 0.25;
+const STOP_CAP_MULTIPLIER = 1.5;
 
 // Direction consistency.
 // Turns smaller than this are considered normal pen curvature.
@@ -227,7 +238,7 @@ export class PointerPredictor {
 		 */
 
 		const confidence = this.clamp01(
-				CONFIDENCE_FLOOR +
+				(CONFIDENCE_FLOOR_STRAIGHT + (CONFIDENCE_FLOOR_CORNER - CONFIDENCE_FLOOR_STRAIGHT) * (1 - directionInfo.cornerDamp)) +
 				directionInfo.consistency * 0.30 +
 				directionInfo.cornerDamp * 0.25 +
 				speedInfo.stability * 0.15 +
@@ -255,11 +266,37 @@ export class PointerPredictor {
 
 		const absoluteMaxDistance = Math.min(2.4 * this.config.predictionMs, 120);
 
-		const predictionDistance = Math.min(unclampedDistance, absoluteMaxDistance) * confidence;
+		let predictionDistance = Math.min(unclampedDistance, absoluteMaxDistance) * confidence;
 
 		if (predictionDistance < 0.01) {
 			return [];
 		}
+
+		/*
+		 * Instant-stop cap. Compare the newest sample-pair speed against
+		 * the regression speed. If the pen is stopping abruptly (newest
+		 * segment runs at < STOP_SPEED_RATIO of the estimated speed), cap
+		 * the prediction distance to a small multiple of the last
+		 * displacement. This reacts within one frame — much faster than
+		 * the endpoint-acceleration estimate used for deceleration damp.
+		 */
+		if (this.samples.length >= 2) {
+			const last = this.samples[this.samples.length - 1]!;
+			const prev = this.samples[this.samples.length - 2]!;
+			const dt = last.time - prev.time;
+			if (dt > 0) {
+				const lastDx = last.x - prev.x;
+				const lastDy = last.y - prev.y;
+				const lastDisplacement = Math.hypot(lastDx, lastDy);
+				const lastSpeed = lastDisplacement / dt;
+				const speedRatio = speed > 1e-6 ? lastSpeed / speed : 1;
+				if (speedRatio < STOP_SPEED_RATIO) {
+					const stopCap = Math.max(1, lastDisplacement * STOP_CAP_MULTIPLIER);
+					predictionDistance = Math.min(predictionDistance, stopCap);
+				}
+			}
+		}
+
 
 		/*
 		 * ------------------------------------------------------------
