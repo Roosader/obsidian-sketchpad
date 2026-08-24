@@ -72,6 +72,29 @@ export function copyTexture(gl: WebGL2RenderingContext, source: GpuTexture, dest
 	gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
 }
 
+// copies a sub-rectangle between textures. All rects are top-left (y-down),
+// matching the scissor convention used elsewhere; blitFramebuffer itself uses
+// bottom-left framebuffer coordinates, so Y is flipped here.
+export function copyTextureRegion(
+	gl: WebGL2RenderingContext,
+	source: GpuTexture,
+	destination: GpuTexture,
+	srcX: number,
+	srcY: number,
+	dstX: number,
+	dstY: number,
+	width: number,
+	height: number,
+): void {
+	const srcY0 = source.height - srcY - height;
+	const dstY0 = destination.height - dstY - height;
+	gl.bindFramebuffer(gl.READ_FRAMEBUFFER, source.framebuffer);
+	gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, destination.framebuffer);
+	gl.blitFramebuffer(srcX, srcY0, srcX + width, srcY0 + height, dstX, dstY0, dstX + width, dstY0 + height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+	gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+	gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+}
+
 // load a layer raster into a full-canvas texture
 export async function loadImageIntoTexture(gl: WebGL2RenderingContext, texture: GpuTexture, dataUrl: string, width: number, height: number, offsetX = 0, offsetY = 0): Promise<void> {
 	const image = new Image();

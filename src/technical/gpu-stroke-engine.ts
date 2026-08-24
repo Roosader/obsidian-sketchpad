@@ -3,6 +3,7 @@ import {
 	MASK_TEXTURE_FORMAT,
 	clearTexture,
 	copyTexture,
+	copyTextureRegion,
 	createLayerTexture,
 	destroyTexture,
 	fillSolidColor,
@@ -76,8 +77,10 @@ export class GpuStrokeEngine implements DrawingEngine {
 
 	private instanceBuffer: WebGLBuffer | null = null;
 	private instanceCapacityBytes = 0;
-	// growable scratch buffer for stamp instance data - avoids allocating a new Float32Array on every pointermove while drawing.
+	// growable scratch buffer for stamp instance data — avoids allocating a
+	// new Float32Array (or number[]) on every pointermove while drawing.
 	private stampData = new Float32Array(0);
+	private stampWriteIndex = 0; // next free slot in stampData (floats)
 
 	private currentStroke: Stroke | null = null;
 	private sizeSampler: PressureCurveSampler | null = null;
@@ -85,8 +88,17 @@ export class GpuStrokeEngine implements DrawingEngine {
 	private lastRenderedPoint = 0;
 	private strokeBounds: Bounds = { ...EMPTY_BOUNDS };
 	private dirtyBounds: Bounds = { ...EMPTY_BOUNDS };
+	// pointer prediction: trailing points appended from the browser's
+	// getPredictedEvents() that render into the live preview but are rolled
+	// back before the stroke commits. The backup texture snapshots the mask
+	// region the predicted stamps touch so they can be erased again.
+	private predictedBackupTex!: GpuTexture;
+	private predictedBackupRect: ScissorRect | null = null;
+	private predictedCount = 0;
 	private rgbColor = { r: 0, g: 0, b: 0 };
 	private lastStackResult!: GpuTexture;
+	// persistent full-canvas framebuffer holding the last composited frame
+	private displayTex!: GpuTexture;
 
 	private activeLayerHasMultiplyAbove = false;
 	
@@ -99,7 +111,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.maxBlendEquation = gpu.maxBlendEquation;
 		this.onChange = onChange;
 
-		const context = canvas.getContext('webgl2', { alpha: true, antialias: false, premultipliedAlpha: false });
+		const context = canvas.getContext('webgl2', { alpha: false, antialias: false, desynchronized: false });
 		if (!context) {
 			throw new Error('WebGL2 context unavailable on this canvas');
 		}
@@ -147,6 +159,78 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.currentStroke?.points.push(point);
 	}
 
+	// appends browser-predicted points that extend the live preview ahead of the latest real sample
+	appendPredictedTail(points: Point[]): void {
+		if (this.destroyed || !this.currentStroke || points.length === 0) {
+			return;
+		}
+		const savedDirty = { ...this.dirtyBounds };
+		this.updateStrokeTextures();
+		if (savedDirty.left !== Infinity) {
+			this.dirtyBounds.left = Math.min(this.dirtyBounds.left, savedDirty.left);
+			this.dirtyBounds.top = Math.min(this.dirtyBounds.top, savedDirty.top);
+			this.dirtyBounds.right = Math.max(this.dirtyBounds.right, savedDirty.right);
+			this.dirtyBounds.bottom = Math.max(this.dirtyBounds.bottom, savedDirty.bottom);
+		}
+
+		const strokePoints = this.currentStroke.points;
+		const anchor = strokePoints[strokePoints.length - 1];
+		if (!anchor) {
+			return;
+		}
+
+		// predicted stamps lie on segments from the anchor through the predicted
+		// points; expand by a couple of stamp diameters so the snapshot covers
+		// every stamp the tail can produce
+		const margin = this.currentStroke.size * 2;
+		let left = anchor.x;
+		let top = anchor.y;
+		let right = anchor.x;
+		let bottom = anchor.y;
+		for (const point of points) {
+			left = Math.min(left, point.x);
+			top = Math.min(top, point.y);
+			right = Math.max(right, point.x);
+			bottom = Math.max(bottom, point.y);
+		}
+		const x = Math.max(0, Math.floor(left - margin));
+		const y = Math.max(0, Math.floor(top - margin));
+		const width = Math.min(this.width, Math.ceil(right + margin)) - x;
+		const height = Math.min(this.height, Math.ceil(bottom + margin)) - y;
+		if (width <= 0 || height <= 0) {
+			return;
+		}
+
+		copyTextureRegion(this.gl, this.maskTex, this.predictedBackupTex, x, y, x, y, width, height);
+		this.predictedBackupRect = { x, y, width, height };
+		for (const point of points) {
+			strokePoints.push(point);
+		}
+		this.predictedCount = points.length;
+	}
+
+	// removes predicted points and restores the mask + composited-preview regions they stamped
+	rollbackPredictedTail(): void {
+		if (!this.currentStroke || this.predictedCount === 0) {
+			return;
+		}
+		const rect = this.predictedBackupRect;
+		if (rect) {
+			copyTextureRegion(this.gl, this.predictedBackupTex, this.maskTex, rect.x, rect.y, rect.x, rect.y, rect.width, rect.height);
+
+			copyTextureRegion(this.gl, this.baselineTex, this.previewComposeTex, rect.x, rect.y, rect.x, rect.y, rect.width, rect.height);
+			this.dirtyBounds.left = Math.min(this.dirtyBounds.left, rect.x);
+			this.dirtyBounds.top = Math.min(this.dirtyBounds.top, rect.y);
+			this.dirtyBounds.right = Math.max(this.dirtyBounds.right, rect.x + rect.width);
+			this.dirtyBounds.bottom = Math.max(this.dirtyBounds.bottom, rect.y + rect.height);
+		}
+		const realCount = this.currentStroke.points.length - this.predictedCount;
+		this.currentStroke.points.length = realCount;
+		this.lastRenderedPoint = Math.min(this.lastRenderedPoint, realCount);
+		this.predictedBackupRect = null;
+		this.predictedCount = 0;
+	}
+
 	beginStroke(layer: OraLayer, point: Point, stroke: StrokeParams & { tool: ToolName }): void {
 		this.currentStroke = { ...stroke, points: [point] };
 		this.sizeSampler = stroke.pressureSize ? buildPressureCurveSampler(stroke.pressureSizeCurve) : null;
@@ -155,6 +239,8 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.lastRenderedPoint = 0;
 		this.strokeBounds = { ...EMPTY_BOUNDS };
 		this.dirtyBounds = { ...EMPTY_BOUNDS };
+		this.predictedBackupRect = null;
+		this.predictedCount = 0;
 
 		clearTexture(this.gl, this.maskTex);
 		clearTexture(this.gl, this.strokeColorTex);
@@ -170,29 +256,50 @@ export class GpuStrokeEngine implements DrawingEngine {
 			return;
 		}
 
+		// predicted points are preview-only; strip them before the stroke is baked into the layer texture
+		this.rollbackPredictedTail();
 		this.updateStrokeTextures();
 
 		const liveTex = this.layerTextures.get(layer.name);
-		if (liveTex) {
-			const scissor = this.toScissorRect(this.strokeBounds);
-			if (scissor) {
-				this.runStrokeCompositePass(liveTex, this.strokeColorTex, this.baselineTex, this.strokeCompositeMode(), scissor);
-			}
+		const scissor = this.toScissorRect(this.strokeBounds);
+		if (liveTex && scissor) {
+			// snapshot the region that is about to change before compositing, so undo only stores (and restores) the pixels the stroke touched
+			this.history.commitStroke(layer.name, liveTex, scissor);
+			this.runStrokeCompositePass(liveTex, this.strokeColorTex, this.baselineTex, this.strokeCompositeMode(), scissor);
+		} else {
+			this.history.cancelStroke();
 		}
 
-		this.history.commitStroke();
 		this.onChange?.();
 		this.currentStroke = null;
 		this.sizeSampler = null;
 		this.opacitySampler = null;
 	}
 
+	cancelStroke(): void {
+		if (!this.currentStroke) {
+			return;
+		}
+		this.history.cancelStroke();
+		this.currentStroke = null;
+		this.sizeSampler = null;
+		this.opacitySampler = null;
+		this.predictedBackupRect = null;
+		this.predictedCount = 0;
+	}
+
 	renderBase(): void {
 		if (this.destroyed) {
 			return;
 		}
-		this.compositeLayerStack(this.documentState.layers, this.scratchA, this.scratchB);
-		this.blit(this.lastStackResult);
+		this.compositeLayerStack(this.documentState.layers, this.scratchA, this.scratchB, { r: 1, g: 1, b: 1, a: 1 });
+		this.presentComposite();
+	}
+
+	// copies the just-composited stack into the persistent display texture and presents it to the canvas
+	private presentComposite(): void {
+		copyTexture(this.gl, this.lastStackResult, this.displayTex, this.width, this.height);
+		this.blit(this.displayTex);
 	}
 
 	drawPreview(layer: OraLayer, fallbackColor: string): void {
@@ -209,12 +316,15 @@ export class GpuStrokeEngine implements DrawingEngine {
 		if (this.activeLayerHasMultiplyAbove) {
 			// a multiply layer above the active layer can't be pre-composited into the above-cache,so composite the full stack live
 			this.compositeLayerStackWithSubstitution(this.documentState.layers, layer.name, this.previewComposeTex, this.scratchA, this.scratchB);
-			this.blit(this.lastStackResult);
+			this.presentComposite();
 		} else {
 			const opacity = layer.opacity / 100;
 			const blendMode = layer.blendMode === 'multiply' ? 1 : 0;
-			// single pass composites below + stroke + above straight to the canvas.
-			this.runStrokePreviewPass(this.belowCacheTex, this.previewComposeTex, this.aboveCacheTex, opacity, blendMode);
+			// single pass composites below + stroke + above into the persistent
+			// display texture, scissored to the newly-dirtied region so fragment
+			// work scales with the stroke instead of the whole document.
+			this.runStrokePreviewPass(this.belowCacheTex, this.previewComposeTex, this.aboveCacheTex, opacity, blendMode, scissor);
+			this.blit(this.displayTex);
 		}
 	}
 
@@ -241,11 +351,12 @@ export class GpuStrokeEngine implements DrawingEngine {
 
 		if (this.activeLayerHasMultiplyAbove) {
 			this.compositeLayerStackWithSubstitution(this.documentState.layers, layer.name, this.previewComposeTex, this.scratchA, this.scratchB);
-			this.blit(this.lastStackResult);
+			this.presentComposite();
 		} else {
 			const opacity = layer.opacity / 100;
 			const blendMode = layer.blendMode === 'multiply' ? 1 : 0;
 			this.runStrokePreviewPass(this.belowCacheTex, this.previewComposeTex, this.aboveCacheTex, opacity, blendMode);
+			this.blit(this.displayTex);
 		}
 	}
 
@@ -297,7 +408,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.selectionLayerName = layer.name;
 		this.selectionBounds = { left, top, width: right - left, height: bottom - top };
 
-		this.history.beginStroke(layer.name, liveTex);
+		this.history.beginSelectionSnapshot(layer.name, liveTex);
 		// copy layer before the selection hole is cut 
 		copyTexture(this.gl, liveTex, this.selectionOriginalTex, this.width, this.height);
 		this.runSelectionExtractPass(liveTex);
@@ -323,7 +434,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 				this.history.cancelStroke();
 			} else {
 				this.runSelectionQuadPass(liveTex, transform);
-				this.history.commitStroke();
+				this.history.commitSelectionSnapshot();
 				this.onChange?.();
 			}
 		}
@@ -335,7 +446,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		if (!this.selectionBounds || this.selectionLayerName !== layer.name) {
 			return;
 		}
-		this.history.cancelStrokeAndRestore(this.layerTextures);
+		this.history.cancelSelectionAndRestore(this.layerTextures);
 		this.selectionBounds = null;
 		this.selectionLayerName = null;
 	}
@@ -375,7 +486,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 			return null;
 		}
 
-		this.compositeLayerStack(this.documentState.layers, this.scratchA, this.scratchB);
+		this.compositeLayerStack(this.documentState.layers, this.scratchA, this.scratchB, { r: 1, g: 1, b: 1, a: 1 });
 		const pixel = new Uint8Array(4);
 		this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.lastStackResult.framebuffer);
 		this.gl.readPixels(x, this.height - 1 - y, 1, 1, this.gl.RGBA, this.gl.UNSIGNED_BYTE, pixel);
@@ -422,6 +533,8 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.destroyOwnedTexture(this.selectionMaskTex);
 		this.destroyOwnedTexture(this.selectionColorTex);
 		this.destroyOwnedTexture(this.selectionOriginalTex);
+		this.destroyOwnedTexture(this.displayTex);
+		this.destroyOwnedTexture(this.predictedBackupTex);
 		if (this.instanceBuffer) {
 			this.gl.deleteBuffer(this.instanceBuffer);
 			this.instanceBuffer = null;
@@ -462,6 +575,8 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.destroyOwnedTexture(this.selectionMaskTex);
 		this.destroyOwnedTexture(this.selectionColorTex);
 		this.destroyOwnedTexture(this.selectionOriginalTex);
+		this.destroyOwnedTexture(this.displayTex);
+		this.destroyOwnedTexture(this.predictedBackupTex);
 		this.selectionBounds = null;
 		this.selectionLayerName = null;
 
@@ -476,6 +591,8 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.selectionMaskTex = createLayerTexture(this.gl, this.width, this.height);
 		this.selectionColorTex = createLayerTexture(this.gl, this.width, this.height);
 		this.selectionOriginalTex = createLayerTexture(this.gl, this.width, this.height);
+		this.displayTex = createLayerTexture(this.gl, this.width, this.height);
+		this.predictedBackupTex = createLayerTexture(this.gl, this.width, this.height, MASK_TEXTURE_FORMAT);
 
 		for (const layer of documentState.layers) {
 			const texture = createLayerTexture(this.gl, this.width, this.height);
@@ -582,7 +699,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		if (liveTex) {
 			copyTexture(this.gl, liveTex, this.baselineTex, this.width, this.height);
 			copyTexture(this.gl, liveTex, this.previewComposeTex, this.width, this.height);
-			this.history.beginStroke(layer.name, liveTex);
+			this.history.beginStroke(layer.name);
 		}
 	}
 
@@ -591,9 +708,9 @@ export class GpuStrokeEngine implements DrawingEngine {
 			return null;
 		}
 
-		const instances = this.collectNewStampInstances();
-		if (instances.length > 0) {
-			this.runStampPass(instances);
+		const stampCount = this.collectNewStamps();
+		if (stampCount > 0) {
+			this.runStampPass(stampCount);
 		}
 
 		const scissor = this.toScissorRect(this.dirtyBounds);
@@ -607,28 +724,30 @@ export class GpuStrokeEngine implements DrawingEngine {
 		return scissor;
 	}
 
-	private collectNewStampInstances(): number[] {
+	/** Write new stamp instances directly into this.stampData (no intermediate
+	 *  number[] allocation), then return the instance count. */
+	private collectNewStamps(): number {
 		if (!this.currentStroke) {
-			return [];
+			return 0;
 		}
 		const points = this.currentStroke.points;
 		if (points.length === 0) {
-			return [];
+			return 0;
 		}
 
-		const instances: number[] = [];
+		this.stampWriteIndex = 0;
 		if (this.lastRenderedPoint === 0) {
-			this.pushStampInstance(instances, points[0]!);
+			this.pushStampInstance(points[0]!);
 			this.lastRenderedPoint = 1;
 		}
 		while (this.lastRenderedPoint < points.length) {
-			this.pushSegmentInstances(instances, points[this.lastRenderedPoint - 1]!, points[this.lastRenderedPoint]!);
+			this.pushSegmentInstances(points[this.lastRenderedPoint - 1]!, points[this.lastRenderedPoint]!);
 			this.lastRenderedPoint += 1;
 		}
-		return instances;
+		return this.stampWriteIndex / 5;
 	}
 
-	private pushSegmentInstances(instances: number[], a: Point, b: Point): void {
+	private pushSegmentInstances(a: Point, b: Point): void {
 		if (!this.currentStroke) {
 			return;
 		}
@@ -650,7 +769,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 
 		for (let i = 1; i <= steps; i += 1) {
 			const t = i / steps;
-			this.pushStampInstance(instances, {
+			this.pushStampInstance({
 				x: a.x + dx * t,
 				y: a.y + dy * t,
 				pressure: (a.pressure ?? 1) + ((b.pressure ?? 1) - (a.pressure ?? 1)) * t,
@@ -658,7 +777,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		}
 	}
 
-	private pushStampInstance(instances: number[], point: Point): void {
+	private pushStampInstance(point: Point): void {
 		if (!this.currentStroke) {
 			return;
 		}
@@ -687,22 +806,30 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.dirtyBounds.right = Math.max(this.dirtyBounds.right, right);
 		this.dirtyBounds.bottom = Math.max(this.dirtyBounds.bottom, bottom);
 
-		instances.push(point.x, point.y, radius, opacity, this.currentStroke.hardness / 100);
+		// Grow stampData if needed (5 floats per instance)
+		const needed = this.stampWriteIndex + 5;
+		if (this.stampData.length < needed) {
+			const bigger = new Float32Array(Math.max(needed, this.stampData.length * 2));
+			bigger.set(this.stampData);
+			this.stampData = bigger;
+		}
+		this.stampData[this.stampWriteIndex] = point.x;
+		this.stampData[this.stampWriteIndex + 1] = point.y;
+		this.stampData[this.stampWriteIndex + 2] = radius;
+		this.stampData[this.stampWriteIndex + 3] = opacity;
+		this.stampData[this.stampWriteIndex + 4] = this.currentStroke.hardness / 100;
+		this.stampWriteIndex = needed;
 	}
 
-	private runStampPass(instances: number[]): void {
-		const count = instances.length / 5;
-		if (this.stampData.length < instances.length) {
-			this.stampData = new Float32Array(instances.length);
-		}
-		this.stampData.set(instances);
-		this.ensureInstanceCapacity(this.stampData.byteLength);
+	private runStampPass(instanceCount: number): void {
+		const bytes = instanceCount * 5 * 4; // 5 floats × 4 bytes each
+		this.ensureInstanceCapacity(bytes);
 		if (!this.instanceBuffer) {
 			return;
 		}
 
 		this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.instanceBuffer);
-		this.gl.bufferSubData(this.gl.ARRAY_BUFFER, 0, this.stampData);
+		this.gl.bufferSubData(this.gl.ARRAY_BUFFER, 0, this.stampData.subarray(0, instanceCount * 5));
 
 		this.bindTarget(this.maskTex, null, null);
 		this.gl.enable(this.gl.BLEND);
@@ -711,7 +838,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.gl.useProgram(this.stampProgram.program);
 		this.gl.uniform2f(this.uniform(this.stampProgram, 'uCanvasSize'), this.width, this.height);
 		this.gl.bindVertexArray(this.stampVao);
-		this.gl.drawArraysInstanced(this.gl.TRIANGLES, 0, 6, count);
+		this.gl.drawArraysInstanced(this.gl.TRIANGLES, 0, 6, instanceCount);
 		this.cleanupDrawState();
 	}
 
@@ -848,8 +975,8 @@ export class GpuStrokeEngine implements DrawingEngine {
 	}
 
 	// composites below + stroke + above in a single full-canvas pass
-	private runStrokePreviewPass(belowTex: GpuTexture, strokeTex: GpuTexture, aboveTex: GpuTexture, opacity: number, blendMode: number): void {
-		this.bindTarget(null, [0, 0, 0, 0], null);
+	private runStrokePreviewPass(belowTex: GpuTexture, strokeTex: GpuTexture, aboveTex: GpuTexture, opacity: number, blendMode: number, scissor: ScissorRect | null = null): void {
+		this.bindTarget(this.displayTex, [0, 0, 0, 0], scissor);
 		this.gl.useProgram(this.strokePreviewProgram.program);
 		this.gl.uniform1f(this.uniform(this.strokePreviewProgram, 'uOpacity'), opacity);
 		this.gl.uniform1i(this.uniform(this.strokePreviewProgram, 'uBlendMode'), blendMode);
@@ -862,8 +989,12 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.drawFullscreen();
 	}
 
-	private compositeLayerStack(layers: OraLayer[], accumA: GpuTexture, accumB: GpuTexture): void {
-		clearTexture(this.gl, accumA);
+	private compositeLayerStack(layers: OraLayer[], accumA: GpuTexture, accumB: GpuTexture, backdrop: { r: number; g: number; b: number; a: number } = { r: 0, g: 0, b: 0, a: 0 }): void {
+		// transparent backdrop by default so partial stacks (the below/above
+		// caches) keep true alpha for later "over" compositing; callers that
+		// produce the final presented image pass opaque white, since the
+		// canvas presents opaquely (alpha: false + desynchronized)
+		clearTexture(this.gl, accumA, backdrop);
 		let current = accumA;
 		let other = accumB;
 		for (const layer of layers) {
@@ -883,7 +1014,8 @@ export class GpuStrokeEngine implements DrawingEngine {
 	}
 
 	private compositeLayerStackWithSubstitution(layers: OraLayer[], activeName: string, substituteTex: GpuTexture, accumA: GpuTexture, accumB: GpuTexture): void {
-		clearTexture(this.gl, accumA);
+		// same opaque-white backdrop as compositeLayerStack
+		clearTexture(this.gl, accumA, { r: 1, g: 1, b: 1, a: 1 });
 		let current = accumA;
 		let other = accumB;
 		for (const layer of layers) {

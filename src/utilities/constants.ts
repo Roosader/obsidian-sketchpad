@@ -1,4 +1,4 @@
-import type { LayerName, ViewTool, RotateAction } from './types';
+import type { LayerName, ViewTool, RotateAction, SizeAction } from './types';
 
 export const DEFAULT_FILE_NAME = 'Untitled sketch';
 
@@ -30,7 +30,7 @@ export const SMALL_CIRCLE_CURSOR = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg
 
 export const PRESSURE_POINT_SIZE = 10; 
 
-export const MAX_UNDO_COUNT = 25;
+export const MAX_UNDO_COUNT = 50;
 
 export const toolCursorClasses = [
 	'sketchpad-pencil-active',
@@ -80,7 +80,26 @@ export const DEFAULT_ROTATE_HOTKEYS: Partial<Record<RotateAction, string>> = {
 	'rotate-cw': 's',
 };
 
+export const DEFAULT_SIZE_HOTKEYS: Partial<Record<SizeAction, string>> = {
+	'size-increase': 'f',
+	'size-decrease': 'd',
+};
+
+// size step per press, in perceptual slider units (0-100)
+export const SIZE_STEP = 5;
+
 export const DEFAULT_ROTATE_SENSITIVITY = 3; // degrees per press
+export const DEFAULT_PREDICTION_DISTANCE_MS = 25;
+export const MIN_PREDICTION_DISTANCE_MS = 5;
+export const MAX_PREDICTION_DISTANCE_MS = 100;
+
+export const DEFAULT_PREDICTION_SENSITIVITY = 50; // slider 0–100
+export const MIN_PREDICTION_SENSITIVITY = 0;
+export const MAX_PREDICTION_SENSITIVITY = 100;
+// Maps slider 0→2.0 px/ms (stable, only predicts on fast moves),
+// slider 100→0.1 px/ms (responsive, predicts even on slow strokes).
+export const PREDICTION_MIN_VEL_AT_ZERO = 2.0;
+export const PREDICTION_MIN_VEL_AT_FULL = 0.1;
 export const MIN_ROTATE_SENSITIVITY = 1;
 export const MAX_ROTATE_SENSITIVITY = 90;
 

@@ -1,6 +1,6 @@
 {
 	"name": "sketchpad",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"description": "Create sketches in Obsidian. Draw with a pencil, pen, or brush with pressure sensitivity. Each drawing tool has its own layer.",
 	"main": "main.js",
 	"type": "module",

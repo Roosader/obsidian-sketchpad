@@ -2,16 +2,22 @@ import { Plugin } from 'obsidian';
 import SketchpadView, { SKETCHPAD_VIEW_TYPE } from './modals/sketchpad-modal';
 import { registerOraEmbedPreview } from './rendering/ora-embed';
 import { cloneToolSettings, type ToolSettings, type ToolSettingsMap } from './utilities/tool-settings';
-import { DEFAULT_TOOL_HOTKEYS, DEFAULT_ROTATE_HOTKEYS, DEFAULT_ROTATE_SENSITIVITY, DEFAULT_FILE_NAME, DEFAULT_IMAGE_WIDTH, DEFAULT_IMAGE_HEIGHT, DEFAULT_PAPER_COLOR, DEFAULT_GRID_SIZE, DEFAULT_GRID_COLOR, DEFAULT_GRID_OPACITY, DEFAULT_LAYER_ORDER, DEFAULT_AUTOSAVE_INTERVAL_MINUTES } from './utilities/constants';
-import type { ToolName, ViewTool, RotateAction, LayerName } from './utilities/types';
+import { DEFAULT_TOOL_HOTKEYS, DEFAULT_ROTATE_HOTKEYS, DEFAULT_SIZE_HOTKEYS, DEFAULT_ROTATE_SENSITIVITY, DEFAULT_FILE_NAME, DEFAULT_IMAGE_WIDTH, DEFAULT_IMAGE_HEIGHT, DEFAULT_PAPER_COLOR, DEFAULT_GRID_SIZE, DEFAULT_GRID_COLOR, DEFAULT_GRID_OPACITY, DEFAULT_LAYER_ORDER, DEFAULT_AUTOSAVE_INTERVAL_MINUTES, DEFAULT_PREDICTION_DISTANCE_MS, DEFAULT_PREDICTION_SENSITIVITY } from './utilities/constants';
+import type { ToolName, ViewTool, RotateAction, SizeAction, LayerName } from './utilities/types';
 import { SketchpadSettingTab } from './utilities/settings';
-import { sanitizeAutosaveInterval, sanitizeDimension, sanitizeGridOpacity, sanitizeGridSize, sanitizeLayerOrder, sanitizePaperColor, sanitizePanelPos } from './utilities/utils';
+import { sanitizeAutosaveInterval, sanitizeDimension, sanitizeGridOpacity, sanitizeGridSize, sanitizeLayerOrder, sanitizePaperColor, sanitizePanelPos, sanitizePredictionDistance, sanitizePredictionSensitivity } from './utilities/utils';
 
 interface SketchpadPluginData {
 	toolSettings?: Partial<Record<ToolName, Partial<ToolSettings>>>;
-	touchCanvasControlsEnabled?: boolean;
+	touchToDrawEnabled?: boolean;
 
 	minimalUI?: boolean;
+
+	pointerPredictionEnabled?: boolean;
+	pointerPredictionDistanceMs?: number;
+	pointerPredictionSensitivity?: number;
+
+	hideCursorWhileDrawing?: boolean;
 
 	leftSidebarPos?: { x: number; y: number };
 	rightSidebarPos?: { x: number; y: number };
@@ -20,6 +26,8 @@ interface SketchpadPluginData {
 
 	rotateHotkeys?: Partial<Record<RotateAction, string>>;
 	rotateSensitivity?: number;
+
+	sizeHotkeys?: Partial<Record<SizeAction, string>>;
 
 	defaultFileName?: string;
 	defaultImageWidth?: number;
@@ -46,13 +54,18 @@ interface SketchpadPluginData {
 export default class SketchpadPlugin extends Plugin {
 
 	toolSettings: ToolSettingsMap = cloneToolSettings();
-	touchCanvasControlsEnabled = false;
+	touchToDrawEnabled = false;
 	minimalUI = true;
+	pointerPredictionEnabled = true;
+	pointerPredictionDistanceMs = DEFAULT_PREDICTION_DISTANCE_MS;
+	pointerPredictionSensitivity = DEFAULT_PREDICTION_SENSITIVITY;
+	hideCursorWhileDrawing = false;
 	leftSidebarPos: { x: number; y: number } | null = null;
 	rightSidebarPos: { x: number; y: number } | null = null;
 	toolHotkeys: Partial<Record<ViewTool, string>> = { ...DEFAULT_TOOL_HOTKEYS };
 	rotateHotkeys: Partial<Record<RotateAction, string>> = { ...DEFAULT_ROTATE_HOTKEYS };
 	rotateSensitivity = DEFAULT_ROTATE_SENSITIVITY;
+	sizeHotkeys: Partial<Record<SizeAction, string>> = { ...DEFAULT_SIZE_HOTKEYS };
 	defaultFileName = DEFAULT_FILE_NAME;
 	defaultImageWidth = DEFAULT_IMAGE_WIDTH;
 	defaultImageHeight = DEFAULT_IMAGE_HEIGHT;
@@ -76,13 +89,18 @@ export default class SketchpadPlugin extends Plugin {
 		const data = (await this.loadData()) as SketchpadPluginData | null;
 
 		this.toolSettings = cloneToolSettings(data?.toolSettings);
-		this.touchCanvasControlsEnabled = data?.touchCanvasControlsEnabled ?? false;
-		this.minimalUI = data?.minimalUI ?? false;
+		this.touchToDrawEnabled = data?.touchToDrawEnabled ?? false;
+		this.minimalUI = data?.minimalUI ?? true;
+		this.pointerPredictionEnabled = data?.pointerPredictionEnabled ?? true;
+		this.pointerPredictionDistanceMs = sanitizePredictionDistance(data?.pointerPredictionDistanceMs, DEFAULT_PREDICTION_DISTANCE_MS);
+		this.pointerPredictionSensitivity = sanitizePredictionSensitivity(data?.pointerPredictionSensitivity, DEFAULT_PREDICTION_SENSITIVITY);
+		this.hideCursorWhileDrawing = data?.hideCursorWhileDrawing ?? false;
 		this.leftSidebarPos = sanitizePanelPos(data?.leftSidebarPos);
 		this.rightSidebarPos = sanitizePanelPos(data?.rightSidebarPos);
 		this.toolHotkeys = { ...DEFAULT_TOOL_HOTKEYS, ...(data?.toolHotkeys ?? {}) };
 		this.rotateHotkeys = { ...DEFAULT_ROTATE_HOTKEYS, ...(data?.rotateHotkeys ?? {}) };
 		this.rotateSensitivity = data?.rotateSensitivity ?? DEFAULT_ROTATE_SENSITIVITY;
+		this.sizeHotkeys = { ...DEFAULT_SIZE_HOTKEYS, ...(data?.sizeHotkeys ?? {}) };
 		this.defaultFileName = data?.defaultFileName?.trim() || DEFAULT_FILE_NAME;
 		this.defaultImageWidth = sanitizeDimension(data?.defaultImageWidth, DEFAULT_IMAGE_WIDTH);
 		this.defaultImageHeight = sanitizeDimension(data?.defaultImageHeight, DEFAULT_IMAGE_HEIGHT);
@@ -180,13 +198,18 @@ export default class SketchpadPlugin extends Plugin {
 	async saveToolSettings(): Promise<void> {
 		await this.saveData({
 			toolSettings: this.toolSettings,
-			touchCanvasControlsEnabled: this.touchCanvasControlsEnabled,
+			touchToDrawEnabled: this.touchToDrawEnabled,
 			minimalUI: this.minimalUI,
+			pointerPredictionEnabled: this.pointerPredictionEnabled,
+			pointerPredictionDistanceMs: this.pointerPredictionDistanceMs,
+			pointerPredictionSensitivity: this.pointerPredictionSensitivity,
+			hideCursorWhileDrawing: this.hideCursorWhileDrawing,
 			leftSidebarPos: this.leftSidebarPos ?? undefined,
 			rightSidebarPos: this.rightSidebarPos ?? undefined,
 			toolHotkeys: this.toolHotkeys,
 			rotateHotkeys: this.rotateHotkeys,
 			rotateSensitivity: this.rotateSensitivity,
+			sizeHotkeys: this.sizeHotkeys,
 			defaultFileName: this.defaultFileName,
 			defaultImageWidth: this.defaultImageWidth,
 			defaultImageHeight: this.defaultImageHeight,
@@ -209,6 +232,20 @@ export default class SketchpadPlugin extends Plugin {
 	notifyGridSettingsChanged(): void {
 		for (const leaf of this.app.workspace.getLeavesOfType(SKETCHPAD_VIEW_TYPE)) {
 			(leaf.view as SketchpadView).updateGridOverlay();
+		}
+	}
+
+	// Push pointer-prediction settings to every open sketchpad view
+	notifyPredictionSettingsChanged(): void {
+		for (const leaf of this.app.workspace.getLeavesOfType(SKETCHPAD_VIEW_TYPE)) {
+			(leaf.view as SketchpadView).updatePredictionConfig();
+		}
+	}
+
+	// Push cursor-overlay settings to every open sketchpad view
+	notifyCursorSettingsChanged(): void {
+		for (const leaf of this.app.workspace.getLeavesOfType(SKETCHPAD_VIEW_TYPE)) {
+			(leaf.view as SketchpadView).updateCursorConfig();
 		}
 	}
 

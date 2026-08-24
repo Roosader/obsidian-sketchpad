@@ -283,11 +283,11 @@ export function buildToolSettingsSidebar(
 	};
 }
 
-function sizeToSlider(size: number): number {
+export function sizeToSlider(size: number): number {
 	const t = Math.sqrt((size - 1) / (TOOL_TIP_MAX_SIZE - 1));
 	return Math.round(t * 100);
 }
-function sliderToSize(sizeValue: number): number {
+export function sliderToSize(sizeValue: number): number {
 	const t = sizeValue / 100;
 	const size = 1 + (TOOL_TIP_MAX_SIZE - 1) * t*t; // quadratic scaling for better control at small sizes
 	return Math.round(size);

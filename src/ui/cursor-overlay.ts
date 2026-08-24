@@ -73,11 +73,12 @@ export class CursorOverlay {
 	private readonly canvas: HTMLCanvasElement;
 	private readonly ctx: CanvasRenderingContext2D;
 	private readonly getCurrentTool: () => ViewTool;
-	private readonly getToolSize: () => number;
+	private readonly getToolSize: (tool: ViewTool) => number;
 	private readonly getZoom: () => number;
 	private readonly getToolSelected: () => boolean;
-
-	private readonly getTouchControlsEnabled: () => boolean;
+	private readonly getIsTouchDrawing: () => boolean;
+	private readonly getHideCursorWhileDrawing: () => boolean;
+	private readonly getIsDrawing: () => boolean;
 
 	private rectLeft = 0;
 	private rectTop = 0;
@@ -90,22 +91,29 @@ export class CursorOverlay {
 
 	private cssSize = -1; // current canvas display size (CSS px)
 
+	private predictionOffsetX = 0; // pointer-prediction offset (client px), applied on top of lastClientX/Y
+	private predictionOffsetY = 0;
+
 	private iconBitmap: HTMLCanvasElement | null = null; //cursor for marking tools
 	private circleBitmap: HTMLCanvasElement | null = null; //cursor for non-marking tools on pen input
 
 	constructor(
 		panel: HTMLElement,
 		getCurrentTool: () => ViewTool,
-		getToolSize: () => number,
+		getToolSize: (tool: ViewTool) => number,
 		getZoom: () => number,
 		getToolSelected: () => boolean,
-		getTouchControlsEnabled: () => boolean,
+		getIsTouchDrawing: () => boolean,
+		getHideCursorWhileDrawing: () => boolean,
+		getIsDrawing: () => boolean,
 	) {
 		this.getCurrentTool = getCurrentTool;
 		this.getToolSize = getToolSize;
 		this.getZoom = getZoom;
 		this.getToolSelected = getToolSelected;
-		this.getTouchControlsEnabled = getTouchControlsEnabled;
+		this.getIsTouchDrawing = getIsTouchDrawing;
+		this.getHideCursorWhileDrawing = getHideCursorWhileDrawing;
+		this.getIsDrawing = getIsDrawing;
 
 		this.canvas = panel.createEl('canvas', { cls: 'sketchpad-cursor-overlay' });
 		this.ctx = this.canvas.getContext('2d')!;
@@ -129,6 +137,21 @@ export class CursorOverlay {
 		this.refresh();
 	}
 
+	/** Set an additional offset (client-space px) from pointer prediction.
+	 *  Re-positions the cursor immediately so the predicted offset takes effect
+	 *  on the same raw update that computed it, instead of lagging one sample
+	 *  behind (until the next handlePointerMove). */
+	setPredictionOffset(dx: number, dy: number): void {
+		if (dx === this.predictionOffsetX && dy === this.predictionOffsetY) {
+			return;
+		}
+		this.predictionOffsetX = dx;
+		this.predictionOffsetY = dy;
+		if (this.hasPosition && this.isDrawnTool()) {
+			this.place();
+		}
+	}
+
 	// moves the cursor canvas to the latest pointer position 
 	handlePointerMove(clientX: number, clientY: number, pointerType: string, buttons: number): void {
 		this.lastClientX = clientX;
@@ -147,15 +170,15 @@ export class CursorOverlay {
 
 	handlePointerLeave(): void {
 		this.hasPosition = false;
+		this.predictionOffsetX = 0;
+		this.predictionOffsetY = 0;
 		this.hide();
 	}
 
-	// hides the cursor on touch when touch canvas controls are enabled
+	// records the pointer type; visibility is decided by isDrawnTool(), which
+	// shows the cursor while touch-drawing and hides it for pan/zoom/rotate
 	handlePointerDown(pointerType: string): void {
 		this.lastPointerType = pointerType;
-		if (pointerType === 'touch' && this.getTouchControlsEnabled()) {
-			this.hide();
-		}
 	}
 
 	destroy(): void {
@@ -174,22 +197,39 @@ export class CursorOverlay {
 		if (!this.getToolSelected()) {
 			return false;
 		}
-
-		if (this.lastPointerType === 'touch' && this.getTouchControlsEnabled()) {
+		let shown: boolean;
+		if (this.lastPointerType === 'touch') {
+			// only show the custom cursor while actively touch-drawing (one
+			// finger with touch-to-draw enabled); hide during touch gestures
+			shown = this.isMarkingTool() && this.getIsTouchDrawing();
+		} else {
+			// true for marking tools, or when using other tools with a pen
+			shown = this.isMarkingTool() || (this.lastPointerType === 'pen' && (this.lastButtons & 1) !== 0);
+		}
+		if (shown && this.isMarkingTool() && this.getHideCursorWhileDrawing() && this.getIsDrawing()) {
 			return false;
 		}
-		// true for marking tools, or when using other tools with a pen
-		return this.isMarkingTool() || (this.lastPointerType === 'pen' && (this.lastButtons & 1) !== 0);
+		return shown;
+	}
+
+	// true while the Wacom stylus eraser end is in contact (buttons bit 5)
+	private isStylusEraserActive(): boolean {
+		return this.lastPointerType === 'pen' && (this.lastButtons & 32) !== 0;
+	}
+
+	// the eraser is always active when using the wacom stylus eraser end
+	private effectiveTool(): ViewTool {
+		return this.isStylusEraserActive() ? 'eraser' : this.getCurrentTool();
 	}
 
 	private isMarkingTool(): boolean {
-		return DRAWN_TOOLS.has(this.getCurrentTool());
+		return DRAWN_TOOLS.has(this.effectiveTool());
 	}
 
 	private updateTipSize(): void {
 		let cssSize: number;
 		if (this.isMarkingTool()) {
-			const tipDiameterCss = this.getToolSize() * this.getZoom();
+			const tipDiameterCss = this.getToolSize(this.effectiveTool()) * this.getZoom();
 			cssSize = Math.max(
 				CURSOR_PX,
 				Math.ceil(tipDiameterCss) + 2 * TIP_PADDING_PX,
@@ -223,7 +263,7 @@ export class CursorOverlay {
 		if (marking) {
 
 			const scale = RENDER_SCALE;
-			const radius = ((this.getToolSize() * this.getZoom()) / 2) * scale;
+			const radius = ((this.getToolSize(this.effectiveTool()) * this.getZoom()) / 2) * scale;
 			const cx = this.canvas.width / 2;
 			const cy = this.canvas.height / 2;
 			const hairline = TIP_LINE_PX * scale;
@@ -260,8 +300,8 @@ export class CursorOverlay {
 
 	private place(): void {
 		// round to whole pixels to prevent aliasing
-		const x = Math.round(this.lastClientX - this.rectLeft - this.cssSize / 2);
-		const y = Math.round(this.lastClientY - this.rectTop - this.cssSize / 2);
+		const x = Math.round(this.lastClientX + this.predictionOffsetX - this.rectLeft - this.cssSize / 2);
+		const y = Math.round(this.lastClientY + this.predictionOffsetY - this.rectTop - this.cssSize / 2);
 		this.canvas.style.transform = `translate3d(${x}px, ${y}px, 0)`;
 	}
 

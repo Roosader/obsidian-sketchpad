@@ -11,13 +11,16 @@ export interface ViewportDeps {
 	getCurrentTool: () => ViewTool;
 	getViewControls: () => ViewControlElements | undefined;
 	isActive: () => boolean;
-	isTouchControlsEnabled: () => boolean;
+	isTouchToDrawEnabled: () => boolean;
 
 	refreshCursorOverlay?: () => void;	// called when the custom tool cursor should be redrawn
 
 	onViewTransformChange?: () => void; //called on zoom/rotate/flip/fit
 
 	onTouchTap?: (fingerCount: number) => void; //for multi-touch undo/redo
+
+	// fired when a second finger lands while touch-to-draw is enabled
+	onMultiTouchGestureStart?: (wasTapCandidate: boolean) => void;
 }
 
 const TOUCH_TAP_MOVE_PX = 12; // max any finger may drift from its down point (screen CSS px)
@@ -41,6 +44,9 @@ export class CanvasViewport {
 		stackCenter: { x: 0, y: 0 },
 	};
 	private rotatePreviousAngle = 0;
+	// cached screen-space center of the canvas stack (transform-origin), which
+	// only changes when the panel or stack geometry changes, not while drawing
+	private cachedStackCenter: { x: number; y: number } | null = null;
 	private activeTouchPoints = new Map<number, { x: number; y: number }>();
 	private touchPanStart: { x: number; y: number; panX: number; panY: number } | null = null;
 	private touchGestureStart: {
@@ -58,6 +64,7 @@ export class CanvasViewport {
 	private touchTapMaxPoints = 0;
 	private touchTapStartTime = 0;
 	private touchTapMoved = false;
+	private touchGestureActive = false;
 
 	constructor(private readonly deps: ViewportDeps) {}
 
@@ -68,11 +75,25 @@ export class CanvasViewport {
 	// center of the canvas-stack box in screen coordinates
 	// transform anchor for zoom, flip
 	private getStackCenter(): { x: number; y: number } {
+		if (!this.cachedStackCenter) {
+			this.cachedStackCenter = this.computeStackCenter();
+		}
+		return this.cachedStackCenter;
+	}
+
+	private computeStackCenter(): { x: number; y: number } {
 		const panelRect = this.deps.canvasPanel.getBoundingClientRect();
 		return {
 			x: panelRect.left + this.deps.canvasStack.offsetLeft + this.size.width / 2,
 			y: panelRect.top + this.deps.canvasStack.offsetTop + this.size.height / 2,
 		};
+	}
+
+	// the cached stack center depends on the panel's screen position and the
+	// stack's size/position, none of which change while drawing. Call this
+	// whenever those could have changed so the next read recomputes fresh.
+	invalidateGeometryCache(): void {
+		this.cachedStackCenter = null;
 	}
 
 	// center of the canvas panel (the on-screen viewport) in screen coordinates. 
@@ -139,6 +160,7 @@ export class CanvasViewport {
 
 	/* Zoom functions */
 	setZoom(zoom: number): void {
+		this.invalidateGeometryCache();
 		const clamped = clampZoom(zoom);
 		if (clamped === this.view.zoom) {
 			return;
@@ -221,6 +243,7 @@ export class CanvasViewport {
 		if (!this.deps.isActive()) {
 			return;
 		}
+		this.invalidateGeometryCache();
 		event.preventDefault();
 		const factor = event.deltaY < 0 ? WHEEL_ZOOM_FACTOR : 1 / WHEEL_ZOOM_FACTOR;
 		const newZoom = clampZoom(this.view.zoom * factor);
@@ -264,6 +287,7 @@ export class CanvasViewport {
 	}
 
 	setRotation(rotation: number): void {
+		this.invalidateGeometryCache();
 		const clamped = clampRotation(rotation);
 		if (clamped === this.view.rotation) {
 			return;
@@ -276,6 +300,7 @@ export class CanvasViewport {
 	// rotates the canvas by the given number of degrees (counter-clockwise
 	// for negative values), normalizing to (-180, 180].
 	rotateBy(degrees: number): void {
+		this.invalidateGeometryCache();
 		this.rotateAroundScreenCenter(degrees);
 	}
 
@@ -289,6 +314,7 @@ export class CanvasViewport {
 
 	// flips the canvas around the center of the screen, not the center of the image
 	toggleFlip(axis: 'flipX' | 'flipY'): void {
+		this.invalidateGeometryCache();
 		this.view[axis] = !this.view[axis];
 		this.view.rotation = -this.view.rotation;
 
@@ -332,6 +358,7 @@ export class CanvasViewport {
 		const top = (panelRect.height - this.size.height) / 2;
 		this.deps.canvasStack.style.left = `${left}px`;
 		this.deps.canvasStack.style.top = `${top}px`;
+		this.invalidateGeometryCache();
 	}
 
 	updateViewControlsUI(): void {
@@ -357,56 +384,30 @@ export class CanvasViewport {
 	}
 
 	getPointFromClient(clientX: number, clientY: number): Point {
-		const panelRect = this.deps.canvasPanel.getBoundingClientRect();
-		const stackLeft = panelRect.left + this.deps.canvasStack.offsetLeft;
-		const stackTop = panelRect.top + this.deps.canvasStack.offsetTop;
+		// invert the canvas stack's CSS transform directly from this.view
+		const center = this.getStackCenter();
+		const ox = this.size.width / 2;
+		const oy = this.size.height / 2;
 
-		const style = getComputedStyle(this.deps.canvasStack);
-		const transformText = style.transform === 'none' ? 'matrix(1, 0, 0, 1, 0, 0)' : style.transform;
-		const matrix = new DOMMatrixReadOnly(transformText);
-		const inverse = matrix.inverse();
+		const scaleX = this.view.flipX ? -this.view.zoom : this.view.zoom;
+		const scaleY = this.view.flipY ? -this.view.zoom : this.view.zoom;
+		const angle = (this.view.rotation * Math.PI) / 180;
+		const cos = Math.cos(angle);
+		const sin = Math.sin(angle);
 
-		const parseOriginComponent = (token: string | undefined, size: number, axis: 'x' | 'y'): number => {
-			const value = (token ?? '').trim().toLowerCase();
-			if (!value || value === 'center') {
-				return size / 2;
-			}
-			if (axis === 'x') {
-				if (value === 'left') {
-					return 0;
-				}
-				if (value === 'right') {
-					return size;
-				}
-			} else {
-				if (value === 'top') {
-					return 0;
-				}
-				if (value === 'bottom') {
-					return size;
-				}
-			}
-			if (value.endsWith('%')) {
-				const percent = Number.parseFloat(value);
-				return Number.isFinite(percent) ? (percent / 100) * size : size / 2;
-			}
-			const absolute = Number.parseFloat(value);
-			return Number.isFinite(absolute) ? absolute : size / 2;
+		// undo translate
+		const rx = clientX - center.x - this.view.panX;
+		const ry = clientY - center.y - this.view.panY;
+
+		// undo rotate
+		const sx = rx * cos + ry * sin;
+		const sy = -rx * sin + ry * cos;
+
+		// undo scale/flip and add back the local origin
+		return {
+			x: sx / scaleX + ox,
+			y: sy / scaleY + oy,
 		};
-
-		const originParts = style.transformOrigin.split(/\s+/);
-		const originX = parseOriginComponent(originParts[0], this.deps.canvasStack.offsetWidth, 'x');
-		const originY = parseOriginComponent(originParts[1], this.deps.canvasStack.offsetHeight, 'y');
-
-		const anchorX = stackLeft + originX;
-		const anchorY = stackTop + originY;
-		const relativeX = clientX - anchorX;
-		const relativeY = clientY - anchorY;
-		const localFromOrigin = inverse.transformPoint(new DOMPoint(relativeX, relativeY));
-		const x = localFromOrigin.x + originX;
-		const y = localFromOrigin.y + originY;
-
-		return { x, y };
 	}
 
 	getPressure(event: PointerEvent): number {
@@ -417,15 +418,12 @@ export class CanvasViewport {
 	}
 
 	/* touch input handling */
-	syncTouchInputMode(): void {
-		const touchAction = this.deps.isTouchControlsEnabled() ? 'none' : '';
-		this.deps.canvasPanel.style.touchAction = touchAction;
-		this.deps.canvas.style.touchAction = touchAction;
+	isTouchDrawActive(): boolean {
+		return !this.touchGestureActive && this.activeTouchPoints.size === 1;
 	}
 
 	tryHandleTouchPointerDown(event: PointerEvent): boolean {
-		this.syncTouchInputMode();
-		if (!this.deps.isTouchControlsEnabled() || event.pointerType !== 'touch') {
+		if (event.pointerType !== 'touch') {
 			return false;
 		}
 
@@ -436,23 +434,34 @@ export class CanvasViewport {
 			this.touchTapMaxPoints = 1;
 			this.touchTapStartTime = performance.now();
 			this.touchTapMoved = false;
+			this.touchGestureActive = !this.deps.isTouchToDrawEnabled();
 		}
 		this.activeTouchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
 		this.touchTapDownPositions.set(event.pointerId, { x: event.clientX, y: event.clientY });
 		this.touchTapMaxPoints = Math.max(this.touchTapMaxPoints, this.activeTouchPoints.size);
 
 		if (this.activeTouchPoints.size >= 2) {
+			// a second finger arrived mid-stroke: switch to a view gesture and
+			// preserve or discard the in-progress one-finger stroke.
+			if (!this.touchGestureActive) {
+				this.touchGestureActive = true;
+				this.deps.onMultiTouchGestureStart?.(!this.touchTapMoved);
+			}
 			this.initializeTouchTransformGesture();
-		} else {
-			this.initializeTouchPanGesture();
+			return true;
 		}
 
-		return true;
+		if (this.touchGestureActive) {
+			this.initializeTouchPanGesture();
+			return true;
+		}
+
+		// single finger + touch-to-draw enabled: let the drawing controller handle it
+		return false;
 	}
 
 	tryHandleTouchPointerMove(event: PointerEvent): boolean {
-		this.syncTouchInputMode();
-		if (!this.deps.isTouchControlsEnabled() || event.pointerType !== 'touch') {
+		if (event.pointerType !== 'touch') {
 			return false;
 		}
 
@@ -475,6 +484,10 @@ export class CanvasViewport {
 			}
 		}
 
+		if (!this.touchGestureActive) {
+			return false;
+		}
+
 		if (this.activeTouchPoints.size >= 2) {
 			this.updateTouchTransformGesture();
 		} else {
@@ -485,8 +498,7 @@ export class CanvasViewport {
 	}
 
 	tryHandleTouchPointerUp(event: PointerEvent): boolean {
-		this.syncTouchInputMode();
-		if (!this.deps.isTouchControlsEnabled() || event.pointerType !== 'touch') {
+		if (event.pointerType !== 'touch') {
 			return false;
 		}
 
@@ -497,6 +509,11 @@ export class CanvasViewport {
 		}
 		this.activeTouchPoints.delete(event.pointerId);
 		this.touchTapDownPositions.delete(event.pointerId);
+
+		if (!this.touchGestureActive) {
+			this.resetTouchGestureState();
+			return false;
+		}
 
 		if (this.activeTouchPoints.size >= 2) {
 			this.initializeTouchTransformGesture();
@@ -518,14 +535,18 @@ export class CanvasViewport {
 		) {
 			this.deps.onTouchTap?.(this.touchTapMaxPoints);
 		}
+		this.resetTouchGestureState();
+		return true;
+	}
+
+	private resetTouchGestureState(): void {
+		this.touchGestureActive = false;
 		this.touchTapActive = false;
 		this.touchTapMaxPoints = 0;
 		this.touchTapStartTime = 0;
 		this.touchTapMoved = false;
-
 		this.touchPanStart = null;
 		this.touchGestureStart = null;
-		return true;
 	}
 
 	private initializeTouchPanGesture(): void {

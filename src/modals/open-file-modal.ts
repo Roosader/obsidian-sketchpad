@@ -1,7 +1,7 @@
 import { App, Modal, Notice, TFile } from 'obsidian';
 import { getThumbnailDataUrl } from '../ora/ora-parser';
 import { FolderTreeBrowser } from '../ui/folder-tree-browser';
-import { blurButtonFocusHandler } from '../utilities/utils';
+import { blurControlFocusHandler } from '../utilities/utils';
 
 export interface OpenFileChoice {
     file?: TFile;
@@ -27,7 +27,7 @@ export default class OpenFileModal extends Modal {
         this.contentEl.addClass('sketchpad-open-file-modal');
         // Release focus from clicked buttons so a later Space (tool hotkey)
         // doesn't natively re-activate the last-clicked button.
-        this.modalEl.addEventListener('click', blurButtonFocusHandler(), true);
+        this.modalEl.addEventListener('click', blurControlFocusHandler(), true);
         this.contentEl.createEl('h2', { text: 'Open sketch' });
 
         const body = this.contentEl.createDiv({ cls: 'sketchpad-open-file-body' });
@@ -60,9 +60,11 @@ export default class OpenFileModal extends Modal {
         this.thumbnailGrid.empty();
 
         const folder = this.folderBrowser.getSelectedFolder();
-        const oraFiles = folder.children.filter(
-            (child): child is TFile => child instanceof TFile && child.extension === 'ora',
-        );
+        const oraFiles = folder.children
+            .filter(
+                (child): child is TFile => child instanceof TFile && child.extension === 'ora',
+            )
+            .sort((a, b) => a.basename.localeCompare(b.basename));
 
         if (oraFiles.length === 0) {
             this.thumbnailGrid.createEl('p', {

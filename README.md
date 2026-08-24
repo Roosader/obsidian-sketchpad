@@ -34,6 +34,9 @@ The layers can be reordered except for the Paper layer which always remains at t
 - **Hardness slider**
 - **Blending Mode**: Normal, Replace Alpha, Compare Density
 
+> [!IMPORTANT]
+> Enable `Windows Ink` to have pressure sensitivity on Windows devices.
+
 ## Other tools
 - **Eraser**: erase on the layer of the last active tool.
 - **Eyedropper**: select color for the last active tool.
@@ -50,13 +53,18 @@ The layers can be reordered except for the Paper layer which always remains at t
 - Create and draw on `.ora` files, an open file format for graphics editors created by [OpenRaster](https://www.openraster.org/). 
     - Files created by this plugin can be opened by any applicattion that supports `.ora` files such as Krita. 
     - Each layer is a png image that can be accessed by simply unzipping the `.ora` file.
-- Supports undo/redo upto 25 count.
-- Supports autosave from 5-30 minutes interval.
-- Supports touch controls (disabled by default).
-    - Two-finger pinch to rotate and zoom.
-    - One finger touch to pan.
+- Supports undo/redo upto 50 counts.
+- Supports autosave in 5-30 minutes interval.
+- Supports pointer/stroke prediction.
+- Supports touch controls.
+    - One-finger touch to pan.
+    - Two-finger pinch to rotate, zoom, and pan.
     - Two-finger tap to undo.
     - Three-finger tap to redo.
+
+> [!IMPORTANT]
+> Enabling `Touch to draw` in the settings will make the one-finger gesture draw instead of panning the canvas. All other touch gestures remain the same.
+
 - Export any sketch file as a png image.
 - Embed sketch files in notes with Wikilinks.
 - Set custom keyboard shortcuts for tools and actions in Obsidian's hotkeys settings and the plugin's settings page.
@@ -85,6 +93,8 @@ The layers can be reordered except for the Paper layer which always remains at t
 | Zoom out                 | Mouse Wheel Down |
 | Rotate counter-clockwise | A                |
 | Rotate clockwise         | S                |
+| Decrease tool size       | D                |
+| Increase tool size       | F                |
 | Undo                     |                  |
 | Redo                     |                  |
 | New sketch file          |                  |

@@ -5,16 +5,16 @@ import { GpuStrokeEngine } from '../technical/gpu-stroke-engine';
 import type { DrawingEngine } from '../technical/drawing-engine';
 import { getGpuContext, isGpuSupported } from '../rendering/gpu-context';
 import { buildToolbar, type ToolbarElements } from '../ui/top-toolbar';
-import { buildToolSettingsSidebar, type ToolSettingsSidebarElements } from '../ui/right-sidebar';
+import { buildToolSettingsSidebar, sizeToSlider, sliderToSize, type ToolSettingsSidebarElements } from '../ui/right-sidebar';
 import { buildLayerSidebar, buildViewControls, syncLayerSidebar, type LayerControls, type ViewControlElements } from '../ui/left-sidebar';
 import { createSelectionOverlay, resizeSelectionOverlay, type GizmoScreenContext } from '../ui/selection-overlay';
 import { createGridOverlay, drawGrid, clearGrid } from '../ui/grid-overlay';
 import { CursorOverlay } from '../ui/cursor-overlay';
 import type SketchpadPlugin from '../main';
 import type { LayerName, OraDocument, ViewTool } from '../utilities/types';
-import { DEFAULT_FILE_NAME } from '../utilities/constants';
+import { DEFAULT_FILE_NAME, TOOL_TIP_MAX_SIZE } from '../utilities/constants';
 import { sampleDataUrlColor } from '../utilities/layer-colors';
-import { blurButtonFocusHandler } from '../utilities/utils';
+import { blurControlFocusHandler } from '../utilities/utils';
 import { parseOraArchive } from '../ora/ora-parser';
 import { CanvasViewport } from '../technical/viewport';
 import { ToolController } from './tool-controller';
@@ -80,6 +80,11 @@ export default class SketchpadView extends ItemView {
 	private hotkeyController!: HotkeyController;
 	private drawingController!: DrawingController;
 
+	// the leaf's original detach(), saved so the constructor's tab-close
+	// interception can be undone on close (avoids retaining this view on a
+	// long-lived WorkspaceLeaf).
+	private originalLeafDetach!: () => void;
+
 	constructor(leaf: WorkspaceLeaf, private readonly plugin: SketchpadPlugin) {
 		super(leaf);
 		this.documentState = cloneDocument(DEFAULT_DOCUMENT);
@@ -95,7 +100,7 @@ export default class SketchpadView extends ItemView {
 
 		const newFileButton = this.headerEl.createEl('button', { text: 'New...' });
 		newFileButton.addClass('sketchpad-header-button');
-		this.headerEl.insertBefore(newFileButton, this.headerEl.firstChild);
+		this.headerEl.insertAfter(newFileButton, this.headerEl.firstChild);
 		this.registerDomEvent(newFileButton, 'click', () => {
 			void this.createNewSketchDocument();
 		});
@@ -134,11 +139,11 @@ export default class SketchpadView extends ItemView {
 		this.headerEl.insertBefore(closeButton, this.headerEl.querySelector('.view-actions'));
 
 		// intercept tab closes to offer to save an open file 
-		const originalDetach = this.leaf.detach.bind(this.leaf);
+		this.originalLeafDetach = this.leaf.detach.bind(this.leaf);
 		let closePromptOpen = false;
 		this.leaf.detach = (): void => {
 			if (!this.hasOpenFile || closePromptOpen || !this.documentDirty) {
-				originalDetach();
+				this.originalLeafDetach();
 				return;
 			}
 			closePromptOpen = true;
@@ -160,7 +165,7 @@ export default class SketchpadView extends ItemView {
 				} finally {
 					closePromptOpen = false;
 				}
-				originalDetach();
+				this.originalLeafDetach();
 			})();
 		};
 	}
@@ -220,6 +225,7 @@ export default class SketchpadView extends ItemView {
 		this.headerTitleEl.setText('Sketchpad');
 		this.viewport.resetView();
 		this.canvas.addClass('sketchpad-canvas-hidden');
+		this.toolController?.syncToolbarLayerVisibility();
 		this.updateNoFileUI();
 	}
 
@@ -444,10 +450,16 @@ export default class SketchpadView extends ItemView {
 		this.cursorOverlay = new CursorOverlay(
 			this.canvasPanel,
 			() => this.toolController?.getCurrentTool() ?? 'pencil',
-			() => this.plugin.toolSettings[this.toolController?.getLastDrawTool() ?? 'pencil'].size,
+			(tool) => {
+				// the eraser end uses the eraser's own size
+				const name = tool === 'eraser' ? 'eraser' : (this.toolController?.getLastDrawTool() ?? 'pencil');
+				return this.plugin.toolSettings[name].size;
+			},
 			() => this.viewport?.view.zoom ?? 1,
 			() => this.toolSelected,
-			() => this.plugin.touchCanvasControlsEnabled,
+			() => this.viewport?.isTouchDrawActive() ?? false,
+			() => this.plugin.hideCursorWhileDrawing,
+			() => this.engine?.isDrawing() ?? false,
 		);
 		const cursorResizeObserver = new ResizeObserver(() => this.cursorOverlay?.resize());
 		cursorResizeObserver.observe(this.canvasPanel);
@@ -473,10 +485,16 @@ export default class SketchpadView extends ItemView {
 			getCurrentTool: () => this.toolController?.getCurrentTool() ?? 'pencil',
 			getViewControls: () => this.viewControls,
 			isActive: () => this.app.workspace.getActiveViewOfType(SketchpadView) === this,
-			isTouchControlsEnabled: () => this.plugin.touchCanvasControlsEnabled,
+			isTouchToDrawEnabled: () => this.plugin.touchToDrawEnabled,
 			refreshCursorOverlay: () => this.cursorOverlay?.refresh(),
 
 			onViewTransformChange: () => this.selectionController?.refreshOverlay(),
+
+			onMultiTouchGestureStart: (wasTap) => {
+				// hide the custom cursor while pan/zoom/rotate is active
+				this.cursorOverlay?.handlePointerLeave();
+				this.drawingController?.commitActiveStroke(wasTap);
+			},
 
 			onTouchTap: (fingers) => {
 				if (fingers === 2) {
@@ -575,6 +593,7 @@ export default class SketchpadView extends ItemView {
 			getToolSettingsSidebar: () => this.toolSettingsSidebar,
 			commitSelection: () => this.selectionController?.commitSelection(),
 			syncLayerSidebar: () => this.syncLayerSidebarActive(),
+			hasOpenFile: () => this.hasOpenFile,
 			onToolChange: () => {
 				this.toolSelected = true;
 				this.updateToolSettingsUI();
@@ -589,6 +608,7 @@ export default class SketchpadView extends ItemView {
 			setTool: (tool) => this.toolController?.setTool(tool),
 			hasActiveSelection: () => this.selectionController?.selectionActive ?? false,
 			cancelSelection: () => this.selectionController?.cancelSelection(),
+			adjustToolSize: (delta) => this.adjustToolSize(delta),
 		});
 
 		this.drawingController = new DrawingController({
@@ -603,6 +623,9 @@ export default class SketchpadView extends ItemView {
 			getToolSettingsSidebar: () => this.toolSettingsSidebar,
 		});
 
+		// when available, raw pointer updates drive the custom cursor at native rate
+		const supportsRawPointerUpdate = typeof window !== 'undefined' && 'onpointerrawupdate' in window;
+
 		// panel-level pointer routing (handles pen drawing that starts off-canvas).
 		this.registerDomEvent(this.canvasPanel, 'pointerdown', (event) => {
 			this.cursorOverlay?.handlePointerDown(event.pointerType);
@@ -612,12 +635,13 @@ export default class SketchpadView extends ItemView {
 			this.drawingController?.pointerUp(event);
 		});
 		this.registerDomEvent(this.canvasPanel, 'pointermove', (event) => {
-			// track the custom cursor first so it stays ahead of any drawing work
-			const overToolbar = (event.target as HTMLElement | null)?.closest('.sketchpad-toolbar') != null;
-			if (overToolbar) {
-				this.cursorOverlay?.handlePointerLeave();
-			} else {
-				this.cursorOverlay?.handlePointerMove(event.clientX, event.clientY, event.pointerType, event.buttons);
+			if (!supportsRawPointerUpdate) {
+				const overToolbar = (event.target as HTMLElement | null)?.closest('.sketchpad-toolbar') != null;
+				if (overToolbar) {
+					this.cursorOverlay?.handlePointerLeave();
+				} else {
+					this.cursorOverlay?.handlePointerMove(event.clientX, event.clientY, event.pointerType, event.buttons);
+				}
 			}
 			this.drawingController?.pointerMove(event);
 		});
@@ -628,15 +652,10 @@ export default class SketchpadView extends ItemView {
 			this.cursorOverlay?.handlePointerLeave();
 		});
 
-		// Release focus from any button clicked inside this view (header +
-		// content) so a later Space — used as a tool hotkey — doesn't natively
-		// re-activate the last-clicked button. Capture phase so it also covers
-		// buttons whose handlers stop propagation.
-		this.registerDomEvent(this.containerEl, 'click', blurButtonFocusHandler(), true);
+		this.registerDomEvent(this.containerEl, 'click', blurControlFocusHandler(), true);
 
-		// track the cursor at the raw input rate when available 
-		if (typeof window !== 'undefined' && 'onpointerrawupdate' in window) {
-			const onPanelRawMove = (event: Event): void => {
+		if (supportsRawPointerUpdate) {
+		const onPanelRawUpdate = (event: Event): void => {
 				const pe = event as PointerEvent;
 				const overToolbar = (pe.target as HTMLElement | null)?.closest('.sketchpad-toolbar') != null;
 				if (overToolbar) {
@@ -644,36 +663,56 @@ export default class SketchpadView extends ItemView {
 				} else {
 					this.cursorOverlay?.handlePointerMove(pe.clientX, pe.clientY, pe.pointerType, pe.buttons);
 				}
+
+				this.drawingController?.handleRawPointerUpdate(pe);
+
+				const off = this.drawingController?.getCursorPredictionOffset();
+				if (off && (off.dx !== 0 || off.dy !== 0)) {
+					this.cursorOverlay?.setPredictionOffset(off.dx, off.dy);
+				} else if (off) {
+					this.cursorOverlay?.setPredictionOffset(0, 0);
+				}
 			};
-			const onCanvasRawMove = (event: Event): void => {
-				const pe = event as PointerEvent;
-				this.cursorOverlay?.handlePointerMove(pe.clientX, pe.clientY, pe.pointerType, pe.buttons);
-			};
-			this.canvasPanel.addEventListener('pointerrawupdate', onPanelRawMove, { passive: true });
-			this.canvas.addEventListener('pointerrawupdate', onCanvasRawMove, { passive: true });
+			this.canvasPanel.addEventListener('pointerrawupdate', onPanelRawUpdate, { passive: true });
 			this.register(() => {
-				this.canvasPanel.removeEventListener('pointerrawupdate', onPanelRawMove);
-				this.canvas.removeEventListener('pointerrawupdate', onCanvasRawMove);
+				this.canvasPanel.removeEventListener('pointerrawupdate', onPanelRawUpdate);
 			});
 		}
 
 		this.registerDomEvent(this.canvas, 'pointerdown', (event) => {
 			this.cursorOverlay?.handlePointerDown(event.pointerType);
 			this.drawingController.handlePointerDown(event);
+			//hide the cursor while drawing if the user opted in
+			this.cursorOverlay?.refresh();
 		});
 		this.registerDomEvent(this.canvas, 'pointerenter', this.drawingController.handlePointerEnter);
 		this.registerDomEvent(this.canvas, 'pointermove', (event) => {
-			this.cursorOverlay?.handlePointerMove(event.clientX, event.clientY, event.pointerType, event.buttons);
+			if (!supportsRawPointerUpdate) {
+				this.cursorOverlay?.handlePointerMove(event.clientX, event.clientY, event.pointerType, event.buttons);
+			}
 			this.drawingController?.handlePointerMove(event);
+
+			if (!supportsRawPointerUpdate) {
+				const off = this.drawingController?.getCursorPredictionOffset();
+				if (off && (off.dx !== 0 || off.dy !== 0)) {
+					this.cursorOverlay?.setPredictionOffset(off.dx, off.dy);
+				} else if (off) {
+					this.cursorOverlay?.setPredictionOffset(0, 0);
+				}
+			}
 		});
-		this.registerDomEvent(this.canvas, 'pointerup', this.drawingController.handlePointerUp);
+		this.registerDomEvent(this.canvas, 'pointerup', (event) => {
+			this.drawingController.handlePointerUp(event);
+			//restore the cursor if it was hidden while drawing
+			this.cursorOverlay?.refresh();
+		});
 		this.registerDomEvent(this.canvas, 'pointerleave', this.drawingController.handlePointerUp);
 		this.registerDomEvent(this.canvas, 'pointercancel', this.drawingController.handlePointerUp);
 		this.registerDomEvent(window, 'keydown', this.hotkeyController.handleKeyDown);
 		this.registerDomEvent(window, 'keyup', this.hotkeyController.handleKeyUp);
 		this.registerDomEvent(this.canvasPanel, 'wheel', this.viewport.handleWheel, { passive: false });
-		this.viewport.syncTouchInputMode();
-	
+
+		this.toolController?.syncToolbarLayerVisibility();
 		this.updateToolSettingsUI();
 		this.updateNoFileUI();
 		this.cursorOverlay?.refresh();
@@ -690,6 +729,8 @@ export default class SketchpadView extends ItemView {
 		this.hotkeyController?.clearTempToolHold();
 		this.cursorOverlay?.destroy();
 		this.engine?.destroy();
+
+		this.leaf.detach = this.originalLeafDetach;
 	}
 
 	private renderView(): void {
@@ -845,10 +886,18 @@ export default class SketchpadView extends ItemView {
 		}
 		const shellWidth = this.sketchpadShell.offsetWidth;
 		const shellHeight = this.sketchpadShell.offsetHeight;
+		const MARGIN = 10; 
 		const apply = (sidebar: HTMLElement, pos: { x: number; y: number } | null, anchor: 'left' | 'right'): void => {
 			if (!pos) {
 				return;
 			}
+			// constrain height: available = shell height − top position − bottom margin
+			const availableHeight = Math.max(0, shellHeight - pos.y - MARGIN);
+			sidebar.style.setProperty('max-height', `${availableHeight}px`);
+			// constrain width: available = shell width − margin − distance from anchored edge
+			const availableWidth = Math.max(0, shellWidth - MARGIN - pos.x);
+			sidebar.style.setProperty('max-width', `${availableWidth}px`);
+			// clamp position (uses updated offsetWidth/Height after max-width/max-height applied)
 			const maxX = Math.max(0, shellWidth - sidebar.offsetWidth);
 			const maxY = Math.max(0, shellHeight - sidebar.offsetHeight);
 			const x = Math.min(Math.max(0, pos.x), maxX);
@@ -867,12 +916,31 @@ export default class SketchpadView extends ItemView {
 			sidebar.style.removeProperty('left');
 			sidebar.style.removeProperty('right');
 			sidebar.style.removeProperty('top');
+			sidebar.style.removeProperty('max-width');
+			sidebar.style.removeProperty('max-height');
 		}
 	}
 
 	private switchTool(tool: ViewTool): void {
 		this.hotkeyController?.clearTempToolHold();
 		this.toolController?.setTool(tool);
+	}
+
+	// grows/shrinks the current draw tool's tip size by a perceptual slider step
+	private adjustToolSize(delta: number): void {
+		const tool = this.toolController?.getLastDrawTool() ?? 'pencil';
+		const settings = this.plugin.toolSettings[tool];
+		const slider = sizeToSlider(settings.size) + delta;
+		const clamped = Math.max(0, Math.min(100, slider));
+		let next = sliderToSize(clamped);
+		//guarantee at least a 1px change when changing tool size
+		if (next === settings.size) {
+			next = Math.max(1, Math.min(TOOL_TIP_MAX_SIZE, settings.size + Math.sign(delta)));
+		}
+		settings.size = next;
+		this.cursorOverlay?.refresh();
+		this.toolController?.refreshToolSettingsUI();
+		void this.plugin.saveToolSettings();
 	}
 
 	// marks the open file as changed since its last save/open
@@ -1063,6 +1131,14 @@ export default class SketchpadView extends ItemView {
 			this.plugin.gridColor,
 			this.plugin.gridOpacity,
 		);
+	}
+
+	public updatePredictionConfig(): void {
+		this.drawingController?.updatePredictionConfig();
+	}
+
+	public updateCursorConfig(): void {
+		this.cursorOverlay?.refresh();
 	}
 
 	private handleGridToggle(enabled: boolean): void {

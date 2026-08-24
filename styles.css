@@ -1,3 +1,8 @@
+/* Plugin settings */
+.sketchpad-hotkey-input {
+	max-width: 300px;
+}
+/* Sketchpad modal */
 .workspace-leaf-content .view-content.sketchpad-modal {
 	overflow: hidden; /* remove if there is a problem */
 	padding: 0;
@@ -99,10 +104,16 @@ button.sketchpad-tool {
 	width: 22px;
 	height: 22px;
 }
+.sketchpad-tool.layer-active {
+	--accent-primary-mix: color-mix(in srgb, var(--background-primary) 30%, var(--interactive-accent) 70%);
+	--box-shadow-complementary: oklch(from var(--accent-primary-mix) calc(l + 0.2) calc(c + 0.1) calc(h + 20));
+	box-shadow: 0 0 0 3px var(--box-shadow-complementary);
+}
 .sketchpad-tool.active {
 	background-color: var(--interactive-accent);
 	color: var(--text-on-accent);
 }
+
 .sketchpad-tool:disabled {
 	opacity: 0.4;
 	cursor: not-allowed;
@@ -238,6 +249,7 @@ input[type='range'].sketchpad-vertical-slider {
 	writing-mode: vertical-lr;
 	direction: rtl;
 	align-self: center;
+	min-height: 60px;
 	height: 100%;
 	width: 20px;
 }
@@ -276,6 +288,7 @@ button.sketchpad-expand-collapse-button {
 	background-color:transparent;
 	box-shadow: none;
 	touch-action: none;
+	cursor: pointer;
 }
 button.sketchpad-expand-collapse-button.is-active{
 	color: var(--interactive-accent);
@@ -304,10 +317,12 @@ button.sketchpad-panel-move-button:active {
 .sketchpad-left-sidebar {
 	background: var(--background-primary);
 	border-right: 1px solid var(--background-modifier-border);
-	overflow: hidden;
+	overflow: auto;
 	display: flex;
 	flex-direction: row;
 	flex-shrink: 0;
+	height: 100%;
+	min-height: 0;
 	z-index: 8;
 	touch-action: none;
 }
@@ -317,7 +332,8 @@ button.sketchpad-panel-move-button:active {
 
 .sketchpad-layer-controls {
 	border-right: 1px solid var(--background-modifier-border);
-	flex-shrink: 0;
+	flex: 1;
+	min-height: 0;
 	overflow-y: auto;
 	overflow-x: hidden;
 	width: 200px;
@@ -375,8 +391,8 @@ button.sketchpad-panel-move-button:active {
 	display: flex;
 	align-items: center;
 }
-button.sketchpad-layer-visibility-button,
-button.sketchpad-layer-move-button {
+.sketchpad-layer-controls button.sketchpad-layer-visibility-button,
+.sketchpad-layer-controls button.sketchpad-layer-move-button {
 	padding: 0;
 	background-color: transparent;
 	box-shadow: none;
@@ -465,17 +481,20 @@ input[type='color'].sketchpad-paper-color-picker::-webkit-color-swatch {
 .sketchpad-default-layer-order-row button.sketchpad-layer-move-button {
 	width: 24px;
 	height: 24px;
+	padding: 0;
 }
 
 /* View Controls styles */
 .sketchpad-vertical-toolbar,
 .sketchpad-view-controls{
 	overflow-x:hidden;
-	flex-shrink: 0;
+	flex: 1;
+	min-height: 0;
 	display: flex;
 	flex-direction: column;
 	overflow-y: auto;
 	width: 50px;
+	max-width: 50px;
 	gap: 5px;
 	align-items: center;
 	padding: 5px 0;
@@ -513,10 +532,12 @@ body.is-mobile .sketchpad-view-controls-button {
 {	
 	background: var(--background-primary);
 	border-left: 1px solid var(--background-modifier-border);
-	overflow: hidden;
+	overflow: auto;
 	display: flex;
 	flex-direction: row;
 	flex-shrink: 0;
+	height: 100%;
+	min-height: 0;
 	z-index: 8;
 	touch-action: none;
 }
@@ -527,7 +548,8 @@ body.is-mobile .sketchpad-view-controls-button {
 .sketchpad-tool-settings {
 	border-left: 1px solid var(--background-modifier-border);
 	width: 200px;
-	flex-shrink: 0;
+	flex: 1;
+	min-height: 0;
 	overflow-y: auto;
 	overflow-x: hidden;
 	display: flex;
@@ -563,7 +585,8 @@ body.is-mobile .sketchpad-view-controls-button {
 .sketchpad-okhsl-color-picker { 
 	border-left: 1px solid var(--background-modifier-border);
 	width: 200px;
-	flex-shrink: 0;
+	flex: 1;
+	min-height: 0;
 	overflow-y: auto;
 	overflow-x: hidden;
 	display: flex;
@@ -633,6 +656,12 @@ input[type='range'].sketchpad-okhsl-slider::-webkit-slider-thumb {
 	background-color: var(--text-muted);
 	border: 1px solid var(--background-primary);
 }
+input[type='range'].sketchpad-okhsl-slider:active::-webkit-slider-thumb,
+input[type='range'].sketchpad-okhsl-slider:focus::-webkit-slider-thumb {
+    width: 32px;
+    height: 22px;
+	top: 0;
+}
 
 /* Pressure Curve styles */
 .sketchpad-pressure-curve {
@@ -677,6 +706,10 @@ input[type='range'].sketchpad-okhsl-slider::-webkit-slider-thumb {
 /* Confirm Modal styles */
 .sketchpad-confirm-modal {
 	width: 350px;
+}
+.sketchpad-confirm-modal .modal-content div {
+  display: flex;
+  justify-content: end;
 }
 .sketchpad-confirm-modal button {
 	min-width: 80px;
@@ -762,6 +795,10 @@ input[type='range'].sketchpad-okhsl-slider::-webkit-slider-thumb {
 }
 .sketchpad-new-file-row label {
 	text-wrap: nowrap;
+}
+.sketchpad-new-file-row input[type='number']{
+	min-width: 60px;
+	max-width: 100px;
 }
 .sketchpad-new-file-row input[type='color'].sketchpad-paper-color-picker {
 	margin-left: 0;
@@ -898,10 +935,13 @@ input[type='range'].sketchpad-okhsl-slider::-webkit-slider-thumb {
 }
 
 /* Minimal UI adjustments */
-.sketchpad-left-sidebar.sketchpad-minimal {
+.sketchpad-minimal.sketchpad-left-sidebar {
 	position: absolute;
 	left: 0;
 	height: auto;
+	max-height: calc(100% - 20px);
+	max-width: 100%;
+	overflow: auto;
 	background: var(--background-primary);
 
 	border-radius: var(--radius-m);
@@ -909,10 +949,13 @@ input[type='range'].sketchpad-okhsl-slider::-webkit-slider-thumb {
 	margin-top: 10px;
 	margin-left: 10px;
 }
-.sketchpad-right-sidebar.sketchpad-minimal {
+.sketchpad-minimal.sketchpad-right-sidebar {
 	position: absolute;
 	right: 0;
-	height: auto; 
+	height: auto;
+	max-height: calc(100% - 20px);
+	max-width: 100%;
+	overflow: auto;
 	background: var(--background-primary);
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
@@ -921,8 +964,9 @@ input[type='range'].sketchpad-okhsl-slider::-webkit-slider-thumb {
 }
 .sketchpad-minimal .sketchpad-view-controls,
 .sketchpad-minimal .sketchpad-vertical-toolbar {
-	height: 420px;
+	max-height: 420px;
 	width: 30px;
+	max-width: 30px;
 	border: 0;
 	gap: 5px;
 }
@@ -972,10 +1016,10 @@ input[type='range'].sketchpad-okhsl-slider::-webkit-slider-thumb {
 body.is-mobile .sketchpad-view-controls-button {
 	padding: 0;
 }
-body.is-mobile .sketchpad-vertical-toolbar,
+/* body.is-mobile .sketchpad-vertical-toolbar,
 body.is-mobile .sketchpad-view-controls {
 	height: 500px;
-}
+} */
 body.is-mobile .sketchpad-tool {
 	height: 30px;
 }

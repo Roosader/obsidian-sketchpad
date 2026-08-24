@@ -1,7 +1,7 @@
 import { PluginSettingTab, Setting, setIcon } from 'obsidian';
 import SketchpadPlugin from '../main';
-import type { LayerName, ViewTool, RotateAction } from './types';
-import { MODIFIER_HOTKEY_KEYS, MIN_ROTATE_SENSITIVITY, MAX_ROTATE_SENSITIVITY, DEFAULT_FILE_NAME, DEFAULT_IMAGE_WIDTH, DEFAULT_IMAGE_HEIGHT, MAX_IMAGE_DIMENSION, MAX_GRID_SIZE, AUTOSAVE_INTERVAL_OPTIONS } from './constants';
+import type { LayerName, ViewTool, RotateAction, SizeAction } from './types';
+import { MODIFIER_HOTKEY_KEYS, MIN_ROTATE_SENSITIVITY, MAX_ROTATE_SENSITIVITY, DEFAULT_FILE_NAME, DEFAULT_IMAGE_WIDTH, DEFAULT_IMAGE_HEIGHT, MAX_IMAGE_DIMENSION, MAX_GRID_SIZE, AUTOSAVE_INTERVAL_OPTIONS, DEFAULT_PREDICTION_DISTANCE_MS, MIN_PREDICTION_DISTANCE_MS, MAX_PREDICTION_DISTANCE_MS, MIN_PREDICTION_SENSITIVITY, MAX_PREDICTION_SENSITIVITY, DEFAULT_PREDICTION_SENSITIVITY } from './constants';
 import {normalizeHotkeyKey} from './utils';
 
 const IGNORED_HOTKEY_KEYS = new Set([
@@ -32,6 +32,13 @@ const ROTATE_HOTKEY_ACTIONS: RotateAction[] = ['rotate-ccw', 'rotate-cw'];
 const ROTATE_HOTKEY_LABELS: Partial<Record<RotateAction, string>> = {
 	'rotate-ccw': 'Rotate counter-clockwise',
 	'rotate-cw': 'Rotate clockwise',
+};
+
+const SIZE_HOTKEY_ACTIONS: SizeAction[] = ['size-increase', 'size-decrease'];
+
+const SIZE_HOTKEY_LABELS: Partial<Record<SizeAction, string>> = {
+	'size-increase': 'Increase tool tip size',
+	'size-decrease': 'Decrease tool tip size',
 };
 
 function displayHotkey(key: string): string {
@@ -66,13 +73,17 @@ export class SketchpadSettingTab extends PluginSettingTab
         containerEl.empty();
 
         new Setting(containerEl)
-            .setName('Enable touch canvas controls')
-            .setDesc('One finger pans, two fingers pinch to zoom and twist to rotate. Two-finger tap to undo. Three-finger tap to redo. Touch to draw is disabled.')
+            .setName('Enable touch to draw')
+            .setDesc(createFragment((frag) => {
+                frag.appendText('If disabled, one finger pans the canvas. Two fingers also pan, pinch to zoom, and twist to rotate. Two-finger tap to undo. Three-finger tap to redo.');
+                frag.createEl('br');
+                frag.appendText('When enabled, one finger will draw instead of panning the canvas. All other touch controls remain the same.');
+            }))
             .addToggle((toggle) => {
                 toggle
-                    .setValue(this.plugin.touchCanvasControlsEnabled)
+                    .setValue(this.plugin.touchToDrawEnabled)
                     .onChange(async (value) => {
-                        this.plugin.touchCanvasControlsEnabled = value;
+                        this.plugin.touchToDrawEnabled = value;
                         await this.plugin.saveToolSettings();
                     });
             });
@@ -88,7 +99,6 @@ export class SketchpadSettingTab extends PluginSettingTab
                         await this.plugin.saveToolSettings();
                     });
             });
-
         new Setting(containerEl)
             .setName('Reset sidebar positions')
             .addButton((button) => {
@@ -99,6 +109,98 @@ export class SketchpadSettingTab extends PluginSettingTab
                         this.plugin.rightSidebarPos = null;
                         await this.plugin.saveToolSettings();
                         this.plugin.resetPanelPositions();
+                    });
+            });
+
+        new Setting(containerEl)
+            .setName('Hide cursor while drawing')
+            .setDesc('Hides the cursor while a drawing tool (pencil, pen, brush, eraser) is actively drawing. The cursor remains visible while hovering.')
+            .addToggle((toggle) => {
+                toggle
+                    .setValue(this.plugin.hideCursorWhileDrawing)
+                    .onChange(async (value) => {
+                        this.plugin.hideCursorWhileDrawing = value;
+                        await this.plugin.saveToolSettings();
+                        this.plugin.notifyCursorSettingsChanged();
+                    });
+            });
+
+        new Setting(containerEl)
+            .setName('Pointer prediction')
+            .setHeading();
+
+        let distanceSlider: import('obsidian').SliderComponent;
+        let sensitivitySlider: import('obsidian').SliderComponent;
+        let distanceSetting: import('obsidian').Setting;
+        let predSensitivitySetting: import('obsidian').Setting;
+
+        new Setting(containerEl)
+            .setName('Enable pointer prediction')
+            .setDesc(createFragment((frag) => {
+                frag.appendText('Extends the live stroke preview slightly ahead to mask input lag while drawing. May cause visual artifacts on fast strokes. Stroke predictions are never saved to the canvas.');
+            }))
+            .addToggle((toggle) => {
+                toggle
+                    .setValue(this.plugin.pointerPredictionEnabled)
+                    .onChange(async (value) => {
+                        this.plugin.pointerPredictionEnabled = value;
+                        await this.plugin.saveToolSettings();
+                        this.plugin.notifyPredictionSettingsChanged();
+                        // enable/disable the sub-controls
+                        distanceSlider.setDisabled(!value);
+                        sensitivitySlider.setDisabled(!value);
+                        distanceSetting.setDisabled(!value);
+                        predSensitivitySetting.setDisabled(!value);
+                    });
+            });
+
+        distanceSetting = new Setting(containerEl)
+            .setName('Prediction distance')
+            .setDesc('How far ahead of the real stroke the prediction renders. Higher setting hides more input lag but may overshoot on fast strokes.')
+            .addSlider((slider) => {
+                distanceSlider = slider;
+                slider
+                    .setLimits(MIN_PREDICTION_DISTANCE_MS, MAX_PREDICTION_DISTANCE_MS, 1)
+                    .setValue(this.plugin.pointerPredictionDistanceMs)
+                    .onChange(async (value) => {
+                        this.plugin.pointerPredictionDistanceMs = value;
+                        await this.plugin.saveToolSettings();
+                        this.plugin.notifyPredictionSettingsChanged();
+                    });
+            });
+
+        predSensitivitySetting = new Setting(containerEl)
+            .setName('Prediction sensitivity')
+            .setDesc('How readily prediction engages in response to drawing speed. Lower setting is more stable, higher setting feels more responsive on slow lines.')
+            .addSlider((slider) => {
+                sensitivitySlider = slider;
+                slider
+                    .setLimits(MIN_PREDICTION_SENSITIVITY, MAX_PREDICTION_SENSITIVITY, 1)
+                    .setValue(this.plugin.pointerPredictionSensitivity)
+                    .onChange(async (value) => {
+                        this.plugin.pointerPredictionSensitivity = value;
+                        await this.plugin.saveToolSettings();
+                        this.plugin.notifyPredictionSettingsChanged();
+                    });
+            });
+
+        // Apply initial disabled state based on the toggle
+        const predictionEnabled = this.plugin.pointerPredictionEnabled;
+        distanceSetting.setDisabled(!predictionEnabled);
+        predSensitivitySetting.setDisabled(!predictionEnabled);
+
+        new Setting(containerEl)
+            .setName('Reset prediction settings')
+            .addButton((button) => {
+                button
+                    .setButtonText('Reset to defaults')
+                    .onClick(async () => {
+                        this.plugin.pointerPredictionDistanceMs = DEFAULT_PREDICTION_DISTANCE_MS;
+                        this.plugin.pointerPredictionSensitivity = DEFAULT_PREDICTION_SENSITIVITY;
+                        await this.plugin.saveToolSettings();
+                        this.plugin.notifyPredictionSettingsChanged();
+                        // Refresh the whole settings tab so the sliders update
+                        this.display();
                     });
             });
 
@@ -286,6 +388,14 @@ export class SketchpadSettingTab extends PluginSettingTab
                     await this.plugin.saveToolSettings();
                 });
         });
+
+        new Setting(containerEl)
+            .setName('Tool tip size hotkeys')
+            .setHeading();
+
+        for (const action of SIZE_HOTKEY_ACTIONS) {
+            this.addSizeHotkeySetting(containerEl, action);
+        }
     }
 
     private addDefaultLayerOrderSetting(containerEl: HTMLElement): void {
@@ -356,6 +466,16 @@ export class SketchpadSettingTab extends PluginSettingTab
             () => this.plugin.rotateHotkeys[action],
             (key) => { this.plugin.rotateHotkeys[action] = key; },
             () => { delete this.plugin.rotateHotkeys[action]; },
+        );
+    }
+
+    private addSizeHotkeySetting(containerEl: HTMLElement, action: SizeAction): void {
+        this.addHotkeySetting(
+            containerEl,
+            SIZE_HOTKEY_LABELS[action] ?? action,
+            () => this.plugin.sizeHotkeys[action],
+            (key) => { this.plugin.sizeHotkeys[action] = key; },
+            () => { delete this.plugin.sizeHotkeys[action]; },
         );
     }
 
@@ -436,6 +556,11 @@ export class SketchpadSettingTab extends PluginSettingTab
         for (const action of ROTATE_HOTKEY_ACTIONS) {
             if (this.plugin.rotateHotkeys[action] === key) {
                 delete this.plugin.rotateHotkeys[action];
+            }
+        }
+        for (const action of SIZE_HOTKEY_ACTIONS) {
+            if (this.plugin.sizeHotkeys[action] === key) {
+                delete this.plugin.sizeHotkeys[action];
             }
         }
         commit(key);
