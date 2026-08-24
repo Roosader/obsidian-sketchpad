@@ -84,7 +84,7 @@ export function sensitivityToMinVelocity(sliderValue: number): number {
 
 const SENSITIVITY_LABELS = ['Low', 'Medium-low', 'Medium', 'Medium-high', 'High'];
 
-/** Return a qualitative label for a 0–100 sensitivity slider value. */
+// Return a qualitative label for a 0–100 sensitivity slider value
 export function predictionSensitivityLabel(sliderValue: number): string {
 	const idx = Math.min(4, Math.floor(sliderValue / 25));
 	return SENSITIVITY_LABELS[idx]!;
@@ -134,10 +134,7 @@ export function sanitizePanelPos(value: { x: number; y: number } | undefined): {
     return { x: value.x, y: value.y };
 }
 
-// releases focus from any clicked interactive control (button, slider, checkbox,
-// radio, select, color picker) so that pressing Space (tool hotkey) later doesn't
-// natively re-activate the last-clicked control. Text/number inputs are left
-// focused so the user can keep typing.
+// releases focus from any clicked interactive control 
 export function blurControlFocusHandler(): (event: MouseEvent) => void {
     return (event: MouseEvent) => {
         const target = event.target as HTMLElement | null;

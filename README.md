@@ -54,7 +54,7 @@ The layers can be reordered except for the Paper layer which always remains at t
     - Files created by this plugin can be opened by any applicattion that supports `.ora` files such as Krita. 
     - Each layer is a png image that can be accessed by simply unzipping the `.ora` file.
 - Supports undo/redo upto 50 counts.
-- Supports autosave from 5-30 minutes interval.
+- Supports autosave in 5-30 minutes interval.
 - Supports touch controls.
     - One-finger touch to pan.
     - Two-finger pinch to rotate, zoom, and pan.

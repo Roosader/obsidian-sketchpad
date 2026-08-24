@@ -2,9 +2,7 @@ import type { LayerName } from '../utilities/types';
 import { copyTextureRegion, createLayerTexture, destroyTexture, type GpuTexture } from '../rendering/gpu-texture-layer';
 import { MAX_UNDO_COUNT } from '../utilities/constants';
 
-// undo/redo for the GPU renderer
-// each entry stores only the pixels a stroke changed, plus where they live,
-// so memory scales with stroke size rather than the whole document
+// undo/redo for the GPU renderer, memory usage scales with stroke size
 interface Region {
 	x: number;
 	y: number;

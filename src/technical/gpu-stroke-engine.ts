@@ -97,9 +97,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 	private predictedCount = 0;
 	private rgbColor = { r: 0, g: 0, b: 0 };
 	private lastStackResult!: GpuTexture;
-	// persistent full-canvas framebuffer holding the last composited frame, so
-	// the scissored stroke preview can update only the dirty region without
-	// relying on preserveDrawingBuffer
+	// persistent full-canvas framebuffer holding the last composited frame
 	private displayTex!: GpuTexture;
 
 	private activeLayerHasMultiplyAbove = false;
@@ -113,19 +111,6 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.maxBlendEquation = gpu.maxBlendEquation;
 		this.onChange = onChange;
 
-		// desynchronized  Chromium to present the canvas directly instead
-		// of queueing the frame for the next vsync-aligned composite, trimming
-		// output latency while inking (may tear; ignored where unsupported).
-		// Must be paired with an opaque canvas: desynchronized + alpha breaks
-		// presentation on some drivers and renders the canvas solid black.
-		//
-		// NOTE: desynchronized is intentionally disabled because:
-		// 1) On many GPU/driver combos it forces MSAA regardless of
-		//    antialias: false, making strokes appear blurry.
-		// 2) The swap-chain resize & immediate-present model causes
-		//    intermittent solid-white frame flashes.
-		// 3) Other latency work (pointerrawupdate, getCoalescedEvents)
-		//    already keep input lag well under one frame.
 		const context = canvas.getContext('webgl2', { alpha: false, antialias: false, desynchronized: false });
 		if (!context) {
 			throw new Error('WebGL2 context unavailable on this canvas');
@@ -174,18 +159,11 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.currentStroke?.points.push(point);
 	}
 
-	// appends browser-predicted points that extend the live preview ahead of
-	// the latest real sample. Snapshots the mask region their stamps will touch
-	// so the whole tail can be rolled back once real samples catch up.
+	// appends browser-predicted points that extend the live preview ahead of the latest real sample
 	appendPredictedTail(points: Point[]): void {
 		if (this.destroyed || !this.currentStroke || points.length === 0) {
 			return;
 		}
-		// bake pending real samples first so the backup captures the stroke up
-		// to the last real point - restoring it later must preserve those stamps.
-		// Save dirty bounds first: rollbackPredictedTail may have marked the old
-		// predicted region dirty, and updateStrokeTextures() resets dirtyBounds
-		// internally. Merge those back so drawPreview can rebuild the region.
 		const savedDirty = { ...this.dirtyBounds };
 		this.updateStrokeTextures();
 		if (savedDirty.left !== Infinity) {
@@ -231,8 +209,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.predictedCount = points.length;
 	}
 
-	// removes predicted points and restores the mask + composited-preview
-	// regions they stamped, so the next preview pass shows real samples only
+	// removes predicted points and restores the mask + composited-preview regions they stamped
 	rollbackPredictedTail(): void {
 		if (!this.currentStroke || this.predictedCount === 0) {
 			return;
@@ -240,9 +217,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		const rect = this.predictedBackupRect;
 		if (rect) {
 			copyTextureRegion(this.gl, this.predictedBackupTex, this.maskTex, rect.x, rect.y, rect.x, rect.y, rect.width, rect.height);
-			// the composited preview still contains the predicted tail; restore
-			// it from the stroke-start baseline and queue the region for a
-			// rebuild so the presented frame loses the tail too
+
 			copyTextureRegion(this.gl, this.baselineTex, this.previewComposeTex, rect.x, rect.y, rect.x, rect.y, rect.width, rect.height);
 			this.dirtyBounds.left = Math.min(this.dirtyBounds.left, rect.x);
 			this.dirtyBounds.top = Math.min(this.dirtyBounds.top, rect.y);
@@ -281,16 +256,14 @@ export class GpuStrokeEngine implements DrawingEngine {
 			return;
 		}
 
-		// predicted points are preview-only; strip them before the stroke is
-		// baked into the layer texture
+		// predicted points are preview-only; strip them before the stroke is baked into the layer texture
 		this.rollbackPredictedTail();
 		this.updateStrokeTextures();
 
 		const liveTex = this.layerTextures.get(layer.name);
 		const scissor = this.toScissorRect(this.strokeBounds);
 		if (liveTex && scissor) {
-			// snapshot the region that is about to change before compositing,
-			// so undo only stores (and restores) the pixels the stroke touched
+			// snapshot the region that is about to change before compositing, so undo only stores (and restores) the pixels the stroke touched
 			this.history.commitStroke(layer.name, liveTex, scissor);
 			this.runStrokeCompositePass(liveTex, this.strokeColorTex, this.baselineTex, this.strokeCompositeMode(), scissor);
 		} else {
@@ -323,8 +296,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.presentComposite();
 	}
 
-	// copies the just-composited stack into the persistent display texture and
-	// presents it to the canvas
+	// copies the just-composited stack into the persistent display texture and presents it to the canvas
 	private presentComposite(): void {
 		copyTexture(this.gl, this.lastStackResult, this.displayTex, this.width, this.height);
 		this.blit(this.displayTex);

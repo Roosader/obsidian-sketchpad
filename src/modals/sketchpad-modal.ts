@@ -625,7 +625,6 @@ export default class SketchpadView extends ItemView {
 
 		// when available, raw pointer updates drive the custom cursor at native rate
 		const supportsRawPointerUpdate = typeof window !== 'undefined' && 'onpointerrawupdate' in window;
-		new Notice(`Sketchpad is using ${supportsRawPointerUpdate ? 'raw pointer updates' : 'pointermove events'} for cursor tracking.`);
 
 		// panel-level pointer routing (handles pen drawing that starts off-canvas).
 		this.registerDomEvent(this.canvasPanel, 'pointerdown', (event) => {
@@ -653,29 +652,20 @@ export default class SketchpadView extends ItemView {
 			this.cursorOverlay?.handlePointerLeave();
 		});
 
-		// Release focus from any button clicked inside this view (header +
-		// content) so a later Space — used as a tool hotkey — doesn't natively
-		// re-activate the last-clicked button. Capture phase so it also covers
-		// buttons whose handlers stop propagation.
 		this.registerDomEvent(this.containerEl, 'click', blurControlFocusHandler(), true);
 
 		if (supportsRawPointerUpdate) {
 		const onPanelRawUpdate = (event: Event): void => {
 				const pe = event as PointerEvent;
-				// move cursor first (cheap CSS transform) so it positions
-				// immediately, before the heavy GPU work in handleRawPointerUpdate
 				const overToolbar = (pe.target as HTMLElement | null)?.closest('.sketchpad-toolbar') != null;
 				if (overToolbar) {
 					this.cursorOverlay?.handlePointerLeave();
 				} else {
 					this.cursorOverlay?.handlePointerMove(pe.clientX, pe.clientY, pe.pointerType, pe.buttons);
 				}
-				// feed the active stroke at native device rate, ahead of the
-				// rAF-aligned pointermove dispatch
+
 				this.drawingController?.handleRawPointerUpdate(pe);
-				// after the prediction engine has computed its offset, forward
-				// it to the cursor overlay so the tool cursor stays aligned
-				// with the predicted ink tip
+
 				const off = this.drawingController?.getCursorPredictionOffset();
 				if (off && (off.dx !== 0 || off.dy !== 0)) {
 					this.cursorOverlay?.setPredictionOffset(off.dx, off.dy);
@@ -701,9 +691,7 @@ export default class SketchpadView extends ItemView {
 				this.cursorOverlay?.handlePointerMove(event.clientX, event.clientY, event.pointerType, event.buttons);
 			}
 			this.drawingController?.handlePointerMove(event);
-			// on the fallback path (no pointerrawupdate), forward the prediction
-			// offset to the cursor overlay after the predictor has computed it,
-			// matching what the raw-update handler does
+
 			if (!supportsRawPointerUpdate) {
 				const off = this.drawingController?.getCursorPredictionOffset();
 				if (off && (off.dx !== 0 || off.dy !== 0)) {
@@ -741,8 +729,7 @@ export default class SketchpadView extends ItemView {
 		this.hotkeyController?.clearTempToolHold();
 		this.cursorOverlay?.destroy();
 		this.engine?.destroy();
-		// undo the tab-close interception installed in the constructor so this
-		// view isn't retained through the leaf's detach closure.
+
 		this.leaf.detach = this.originalLeafDetach;
 	}
 
@@ -946,10 +933,7 @@ export default class SketchpadView extends ItemView {
 		const slider = sizeToSlider(settings.size) + delta;
 		const clamped = Math.max(0, Math.min(100, slider));
 		let next = sliderToSize(clamped);
-		// Rounding in the quadratic slider can collapse a small step back to the
-		// same pixel size at the extremes (e.g. 1px -> 1px when increasing), which
-		// makes the hotkey feel stuck. Guarantee at least a 1px change in the
-		// intended direction so it always responds.
+		//guarantee at least a 1px change when changing tool size
 		if (next === settings.size) {
 			next = Math.max(1, Math.min(TOOL_TIP_MAX_SIZE, settings.size + Math.sign(delta)));
 		}
@@ -1149,13 +1133,10 @@ export default class SketchpadView extends ItemView {
 		);
 	}
 
-	/** Called when the user changes pointer-prediction settings — applies
-	 *  them to the live drawing controller without restarting the stroke. */
 	public updatePredictionConfig(): void {
 		this.drawingController?.updatePredictionConfig();
 	}
 
-	// called when the user changes cursor-overlay settings
 	public updateCursorConfig(): void {
 		this.cursorOverlay?.refresh();
 	}
