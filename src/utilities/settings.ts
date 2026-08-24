@@ -2,7 +2,7 @@ import { PluginSettingTab, Setting, setIcon } from 'obsidian';
 import SketchpadPlugin from '../main';
 import type { LayerName, ViewTool, RotateAction, SizeAction } from './types';
 import { MODIFIER_HOTKEY_KEYS, MIN_ROTATE_SENSITIVITY, MAX_ROTATE_SENSITIVITY, DEFAULT_FILE_NAME, DEFAULT_IMAGE_WIDTH, DEFAULT_IMAGE_HEIGHT, MAX_IMAGE_DIMENSION, MAX_GRID_SIZE, AUTOSAVE_INTERVAL_OPTIONS, DEFAULT_PREDICTION_DISTANCE_MS, MIN_PREDICTION_DISTANCE_MS, MAX_PREDICTION_DISTANCE_MS, MIN_PREDICTION_SENSITIVITY, MAX_PREDICTION_SENSITIVITY, DEFAULT_PREDICTION_SENSITIVITY } from './constants';
-import {normalizeHotkeyKey, sensitivityToMinVelocity} from './utils';
+import {normalizeHotkeyKey} from './utils';
 
 const IGNORED_HOTKEY_KEYS = new Set([
 	'CapsLock', 'Escape', 'Tab',

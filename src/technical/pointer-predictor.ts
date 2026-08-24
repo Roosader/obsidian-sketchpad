@@ -10,32 +10,16 @@ const MAX_SAMPLES = 6;
 const PREDICTION_STEPS = 3;
 
 export interface PredictionConfig {
-	/** Lookahead window in milliseconds. */
 	predictionMs: number;
-
-	/** Minimum velocity in px/ms below which prediction is suppressed. */
-	minVelocity: number;
+	minVelocity: number; // (px/ms) below this value, prediction is suppressed.
 }
 
-/*
- * Internal tuning constants.
- *
- * These are intentionally kept out of PredictionConfig so the public
- * configuration remains simple.
- */
-
-// Minimum confidence. Prevents several mildly-bad signals from multiplying
-// together and completely eliminating prediction.
-// Base confidence floor. Prevents mildly-bad signals from eliminating
-// prediction. This is the floor for straight-line strokes; at sharp
-// corners the effective floor is lowered dynamically (see predict()).
+// Minimum confidence for straight-line strokes
 const CONFIDENCE_FLOOR_STRAIGHT = 0.15;
 // Minimum confidence floor at sharp corners (cornerDamp ≈ 0).
 const CONFIDENCE_FLOOR_CORNER = 0.02;
 
-// Instant-stop detection: if the newest sample-pair speed drops below this
-// fraction of the regression speed, the pen is stopping abruptly and
-// prediction is clamped to a small multiple of the last displacement.
+// Instant-stop detection
 const STOP_SPEED_RATIO = 0.25;
 const STOP_CAP_MULTIPLIER = 1.5;
 
@@ -69,43 +53,16 @@ const MAX_TURN_RATE = 0.03;
 // Maximum curvature angle allowed over the complete prediction window.
 const MAX_TOTAL_TURN = Math.PI * 0.45;
 
-// Perpendicular displacement (px) below which segment-pair turns are treated
-// as digitizer jitter and suppressed. 2.0px catches most sub-pixel/1px
-// jitter while preserving real curves. Higher values suppress more jitter
-// but may also dampen gentle real curves at high speed.
+// Perpendicular displacement (px) for jitter suppresion
 const NOISE_FLOOR_PX = 2.0;
 // Width of the soft gate between fully suppressed and fully allowed.
 const NOISE_GATE_WIDTH_PX = 1.0;
 
-// Speed-dependent curvature suppression. At high speed, even small turnRates
-// create large hooks because the prediction distance is long. This scales
-// turnRate down proportionally to speed so fast strokes stay straight.
-// Formula: turnRate *= 1 / (1 + SPEED_CURVATURE_K * speed).
+// Speed-dependent curvature suppression
 const SPEED_CURVATURE_K = 0.3;
 
-// Hard cap on the lateral (perpendicular-to-velocity) offset per predicted
-// point, in document pixels. This is the primary hook prevention mechanism:
-// no matter how large the turnRate is, the tail can never curve more than
-// this many pixels sideways. Adapts to the prediction distance via asin(),
-// so at short distances (low speed) more curvature is allowed, and at long
-// distances (high speed) the cap is tighter.
+// Hard cap on the lateral (perpendicular-to-velocity) offset per predicted point
 const MAX_HOOK_PX = 3;
-
-/**
- * Pointer predictor designed for short-latency pen prediction.
- *
- * The predictor estimates recent velocity using a weighted linear regression,
- * estimates turning from recent segment directions, estimates deceleration
- * from recent speed, and generates a short arc-shaped prediction tail.
- *
- * The public API matches the previous predictor:
- *
- * - addSample()
- * - predict()
- * - lastSample()
- * - reset()
- * - setConfig()
- */
 export class PointerPredictor {
 	private readonly samples: Sample[] = [];
 
@@ -119,12 +76,10 @@ export class PointerPredictor {
 		this.config = { predictionMs: 25, minVelocity: 0.5, ...config };
 	}
 
-	/** Replace the live config without resetting the sample buffer. */
 	setConfig(config: PredictionConfig): void {
 		this.config = { ...this.config, ...config };
 	}
 
-	/** Feed one real pointer sample. */
 	addSample(point: Point, time: number): void {
 		if (this.samples.length > 0) {
 			const previous = this.samples[this.samples.length - 1]!;
@@ -143,9 +98,6 @@ export class PointerPredictor {
 		this.lastPressure = point.pressure;
 	}
 
-	/**
-	 * Return predicted points extending beyond the newest real sample.
-	 */
 	predict(): Point[] {
 		if (this.samples.length < 2) {
 			return [];
@@ -153,20 +105,8 @@ export class PointerPredictor {
 
 		const newest = this.samples[this.samples.length - 1]!;
 
-		/*
-		 * ------------------------------------------------------------
-		 * 1. ESTIMATE VELOCITY
-		 * ------------------------------------------------------------
-		 *
-		 * Weighted linear regression over recent samples.
-		 *
-		 * Newer samples receive exponentially more weight, which provides
-		 * temporal smoothing without a persistent EMA — predict() stays a
-		 * pure function of the current sample buffer (critical for the
-		 * rollback pipeline, which restores stroke points to real samples
-		 * between calls but cannot restore predictor-internal state).
-		 */
-
+		// ESTIMATE VELOCITY
+		// Newer samples are exponentially more important than older samples
 		const decay = Math.max(8, this.estimatedIntervalMs * 0.5);
 
 		let sumW = 0;
@@ -208,35 +148,14 @@ export class PointerPredictor {
 			return [];
 		}
 
-		/*
-		 * ------------------------------------------------------------
-		 * 2. ANALYZE RECENT MOTION
-		 * ------------------------------------------------------------
-		 */
-
+		// ANALYZE RECENT MOTION
 		const directionInfo = this.computeDirectionInfo();
 		const speedInfo = this.computeSpeedInfo();
 
-		/*
-		 * ------------------------------------------------------------
-		 * 3. DECELERATION DAMPING
-		 * ------------------------------------------------------------
-		 */
-
+		// DECELERATION DAMPING
 		const decelDamp = this.computeDecelerationDamp(speedInfo.accelerationAlongDirection, speed);
 
-		/*
-		 * ------------------------------------------------------------
-		 * 4. CONFIDENCE
-		 * ------------------------------------------------------------
-		 *
-		 * This is intentionally an additive weighted confidence instead
-		 * of multiplying several factors.
-		 *
-		 * Multiplication caused mildly-imperfect signals to collapse
-		 * prediction too aggressively.
-		 */
-
+		// CONFIDENCE
 		const confidence = this.clamp01(
 				(CONFIDENCE_FLOOR_STRAIGHT + (CONFIDENCE_FLOOR_CORNER - CONFIDENCE_FLOOR_STRAIGHT) * (1 - directionInfo.cornerDamp)) +
 				directionInfo.consistency * 0.30 +
@@ -245,23 +164,13 @@ export class PointerPredictor {
 				decelDamp * 0.15
 			);
 
-		/*
-		 * ------------------------------------------------------------
-		 * 5. SPEED DAMPING NEAR STOP
-		 * ------------------------------------------------------------
-		 */
-
+		// SPEED DAMPING NEAR STOP
 		const speedRamp = this.clamp01(
 			(speed - this.config.minVelocity) / (this.config.minVelocity * 2)
 		);
 		const dampedSpeed = speed * speedRamp;
 
-		/*
-		 * ------------------------------------------------------------
-		 * 6. PREDICTION DISTANCE
-		 * ------------------------------------------------------------
-		 */
-
+		// PREDICTION DISTANCE
 		const unclampedDistance = dampedSpeed * this.config.predictionMs;
 
 		const absoluteMaxDistance = Math.min(2.4 * this.config.predictionMs, 120);
@@ -272,14 +181,7 @@ export class PointerPredictor {
 			return [];
 		}
 
-		/*
-		 * Instant-stop cap. Compare the newest sample-pair speed against
-		 * the regression speed. If the pen is stopping abruptly (newest
-		 * segment runs at < STOP_SPEED_RATIO of the estimated speed), cap
-		 * the prediction distance to a small multiple of the last
-		 * displacement. This reacts within one frame — much faster than
-		 * the endpoint-acceleration estimate used for deceleration damp.
-		 */
+		// Instant-stop cap
 		if (this.samples.length >= 2) {
 			const last = this.samples[this.samples.length - 1]!;
 			const prev = this.samples[this.samples.length - 2]!;
@@ -298,41 +200,20 @@ export class PointerPredictor {
 		}
 
 
-		/*
-		 * ------------------------------------------------------------
-		 * 7. CURVATURE
-		 * ------------------------------------------------------------
-		 *
-		 * Instead of a quadratic x/y fit, we estimate the recent angular
-		 * turning rate and rotate the velocity direction over time.
-		 *
-		 * This is generally more stable for drawing because human pen
-		 * strokes are naturally lines and arcs rather than constant
-		 * Cartesian acceleration trajectories.
-		 */
-
+		// CURVATURE
 		let turnRate = Math.max(-MAX_TURN_RATE, Math.min(MAX_TURN_RATE, directionInfo.turnRate));
 
-		// Curvature is suppressed when confidence is low. Confidence already
-		// incorporates direction consistency and corner damping, so a single
-		// scale factor is sufficient (no separate curveConfidence multiplier).
+		// Curvature is suppressed when confidence is low
 		const curveScale = this.clamp01(
 			(confidence - MIN_CURVE_CONFIDENCE) / (1 - MIN_CURVE_CONFIDENCE)
 		);
 		turnRate *= curveScale;
 
-		// Speed damp: at high speed, the prediction distance is long so
-		// even a small residual turnRate creates a large visible hook at
-		// the tip. Reduce turnRate proportionally to speed so fast strokes
-		// stay straight while slow strokes retain their curvature.
+		// Speed damp: reduce turnRate proportionally to speed so fast strokes
+		// stay straight while slow strokes retain their curvature
 		turnRate /= 1 + SPEED_CURVATURE_K * speed;
 
-		/*
-		 * ------------------------------------------------------------
-		 * 8. GENERATE PREDICTION POINTS
-		 * ------------------------------------------------------------
-		 */
-
+		// GENERATE PREDICTION POINTS
 		const baseAngle = Math.atan2(vy, vx);
 
 		const points: Point[] = [];
@@ -473,27 +354,18 @@ export class PointerPredictor {
 
 			const absTurn = Math.abs(turn);
 
-			/*
-			 * Convert turn angle into consistency.
-			 *
-			 * Small turns remain near 1.
-			 */
+			// Convert turn angle into consistency
+			// Small turns remain near 1
 			const turnConsistency = Math.cos(Math.min(Math.PI, absTurn) * 0.5);
 
-			/*
-			 * Newer direction changes matter more.
-			 */
+			// Newer direction changes matter more
 			const weight = i;
 
 			weightedConsistency += turnConsistency * weight;
 			totalWeight += weight;
 
 			const dt = Math.max(1, (previous.time + current.time) * 0.5);
-			// Noise gate: suppress jitter-induced turns. The perpendicular
-			// displacement (how far off-axis the turn pushes the pen) is a
-			// speed-independent noise metric — 1px of digitizer jitter produces
-			// ~1px of perpendicular displacement regardless of how fast the
-			// pen is moving. Real curves produce several px; jitter produces <1px.
+			// Noise gate: suppress jitter-induced turns
 			const avgLength = (previous.length + current.length) * 0.5;
 			const perpDisplacement = avgLength * Math.sin(absTurn);
 			const noiseDamp = this.clamp01((perpDisplacement - NOISE_FLOOR_PX) / NOISE_GATE_WIDTH_PX);
@@ -512,10 +384,7 @@ export class PointerPredictor {
 
 		const turnRate = totalTurnWeight > 0 ? weightedTurnRate / totalTurnWeight : 0;
 
-		/*
-		 * Corner damping uses the newest turn because prediction needs
-		 * to react immediately when the pen changes direction.
-		 */
+		// Corner damping using the newest turn 
 		let cornerDamp = 1;
 
 		if (lastTurn > TURN_START) {
@@ -529,11 +398,7 @@ export class PointerPredictor {
 			turnRate,
 		};
 	}
-
-	/**
-	 * Analyze recent segment speeds and estimate acceleration along the
-	 * direction of travel.
-	 */
+	// Analyze recent segment speeds and estimate acceleration along the direction of travel
 	private computeSpeedInfo(): {
 		stability: number;
 		accelerationAlongDirection: number;
@@ -591,12 +456,8 @@ export class PointerPredictor {
 
 		const stability = 1 / (1 + SPEED_STABILITY_K * coefficientOfVariation);
 
-		/*
-		 * Estimate acceleration from the first and last speed.
-		 *
-		 * This is intentionally simpler and more stable than fitting a
-		 * second-order polynomial through x/y coordinates.
-		 */
+		//Estimate acceleration from the first and last speed.
+
 		const first = speeds[0]!;
 		const last = speeds[speeds.length - 1]!;
 		let totalDt = 0;
@@ -608,9 +469,7 @@ export class PointerPredictor {
 		return { stability, accelerationAlongDirection: acceleration };
 	}
 
-	/**
-	 * Convert negative acceleration into prediction damping.
-	 */
+	// Convert negative acceleration into prediction damping.
 	private computeDecelerationDamp(
 		acceleration: number,
 		speed: number
@@ -623,7 +482,7 @@ export class PointerPredictor {
 		return 1 - normalizedDeceleration * (1 - DECEL_DAMP_FLOOR);
 	}
 
-	/** Return the most recent real sample. */
+	// Return the most recent real sample
 	lastSample(): Point | undefined {
 		if (this.samples.length === 0) {
 			return undefined;
@@ -638,24 +497,21 @@ export class PointerPredictor {
 		};
 	}
 
-	/** Clear all prediction state for a new stroke. */
 	reset(): void {
 		this.samples.length = 0;
 		this.lastPressure = undefined;
 		this.estimatedIntervalMs = 16;
 	}
 
-	/** Clamp to [0, 1]. */
 	private clamp01(value: number): number {
 		return this.clamp(value, 0, 1);
 	}
 
-	/** Clamp to an arbitrary range. */
 	private clamp(value: number, min: number, max: number): number {
 		return value < min ? min : value > max ? max : value;
 	}
 
-	/** Linear interpolation. */
+	// linear interpolation
 	private lerp(a: number, b: number, t: number): number {
 		return a + (b - a) * t;
 	}
