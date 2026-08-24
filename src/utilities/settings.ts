@@ -200,7 +200,7 @@ export class SketchpadSettingTab extends PluginSettingTab
                         await this.plugin.saveToolSettings();
                         this.plugin.notifyPredictionSettingsChanged();
                         // Refresh the whole settings tab so the sliders update
-                        this.getSettingDefinitions();
+                        this.display();
                     });
             });
 
