@@ -60,9 +60,11 @@ export default class OpenFileModal extends Modal {
         this.thumbnailGrid.empty();
 
         const folder = this.folderBrowser.getSelectedFolder();
-        const oraFiles = folder.children.filter(
-            (child): child is TFile => child instanceof TFile && child.extension === 'ora',
-        );
+        const oraFiles = folder.children
+            .filter(
+                (child): child is TFile => child instanceof TFile && child.extension === 'ora',
+            )
+            .sort((a, b) => a.basename.localeCompare(b.basename));
 
         if (oraFiles.length === 0) {
             this.thumbnailGrid.createEl('p', {
