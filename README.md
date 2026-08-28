@@ -51,9 +51,9 @@ The layers can be reordered except for the Paper layer which always remains at t
 
 ## Features
 - Create and draw on `.ora` files, an open file format for graphics editors created by [OpenRaster](https://www.openraster.org/). 
-    - Files created by this plugin can be opened by any applicattion that supports `.ora` files such as Krita. 
+    - Files created by this plugin can be opened by any application that supports `.ora` files such as Krita. 
     - Each layer is a png image that can be accessed by simply unzipping the `.ora` file.
-- Supports undo/redo upto 50 counts.
+- Supports undo/redo up to 50 counts.
 - Supports autosave in 5-30 minutes interval.
 - Supports pointer/stroke prediction.
 - Supports touch controls.
