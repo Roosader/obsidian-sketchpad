@@ -31,6 +31,16 @@ export interface DrawingEngine {
 	drawSelectionPreview(layer: OraLayer, transform: SelectionTransform): void;
 	commitSelection(layer: OraLayer, transform: SelectionTransform): void;
 	cancelSelection(layer: OraLayer): void;
+	// adds a texture for a layer already appended to the document (extra layers)
+	addLayer(layer: OraLayer): void;
+	// removes and destroys the texture of a layer already removed from the document
+	removeLayer(name: string): void;
+	refreshPreviewCaches(layer: OraLayer): void;
+	// image placement (import): gizmo-driven transform preview and bake
+	beginImagePlacement(layer: OraLayer, imageDataUrl: string): Promise<SelectionBounds | null>;
+	drawImagePlacementPreview(layer: OraLayer, transform: SelectionTransform): void;
+	commitImagePlacement(layer: OraLayer, transform: SelectionTransform): void;
+	cancelImagePlacement(): void;
 
 	// reads every layer's current pixels back into a plain <canvas>, for .ora export 
 	snapshotLayerCanvases(): Promise<Map<LayerName, HTMLCanvasElement>>;

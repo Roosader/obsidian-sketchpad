@@ -17,6 +17,7 @@ import { TextureHistoryStack } from '../history/texture-history';
 import { getLayerFallbackColor } from '../utilities/layer-colors';
 import { buildPressureCurveSampler, type PressureCurveSampler } from './pressure-curve';
 import type { DrawingEngine } from './drawing-engine';
+import { DEFAULT_SELECTION_TRANSFORM, getTransformedCorners } from './selection-geometry';
 import type { LayerName, OraDocument, OraLayer, Point, SelectionBounds, SelectionTransform, Stroke, StrokeParams, ToolName } from '../utilities/types';
 
 type Bounds = { left: number; top: number; right: number; bottom: number };
@@ -39,6 +40,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 	private readonly canvas: HTMLCanvasElement;
 	private readonly maxBlendEquation: number;
 	private readonly nearestSampler: WebGLSampler;
+	private readonly mipmapSampler: WebGLSampler;
 	private readonly linearSampler: WebGLSampler;
 	private readonly emptyVao: WebGLVertexArrayObject;
 	private readonly stampVao: WebGLVertexArrayObject;
@@ -101,6 +103,10 @@ export class GpuStrokeEngine implements DrawingEngine {
 	private displayTex!: GpuTexture;
 
 	private activeLayerHasMultiplyAbove = false;
+
+	// active image placement (import): the full-canvas texture holding the
+	// image being transformed, and its placement bounds
+	private imagePlacement: { layerName: LayerName; imageTexture: GpuTexture; bounds: SelectionBounds } | null = null;
 	
 	// used to check if the file has changed since last save
 	private onChange?: () => void;
@@ -121,6 +127,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 
 		this.nearestSampler = this.createSampler(this.gl.NEAREST);
 		this.linearSampler = this.createSampler(this.gl.LINEAR);
+		this.mipmapSampler = this.createSampler(this.gl.LINEAR_MIPMAP_LINEAR, this.gl.LINEAR);
 		this.emptyVao = this.requireVertexArray();
 		this.stampVao = this.requireVertexArray();
 
@@ -131,7 +138,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.strokePreviewProgram = this.createProgram(STROKE_PREVIEW_SHADER, ['uOpacity', 'uBlendMode', 'uBelowTex', 'uStrokeTex', 'uAboveTex']);
 		this.blitProgram = this.createProgram(BLIT_SHADER, ['uSourceTex']);
 		this.selectionExtractProgram = this.createProgram(SELECTION_EXTRACT_SHADER, ['uSourceTex', 'uMaskTex']);
-		this.selectionQuadProgram = this.createProgram(SELECTION_QUAD_SHADER, ['uCanvasSize', 'uSelectionCenter', 'uTranslate', 'uRotation', 'uScale', 'uSelectionTex', 'uDstTex']);
+		this.selectionQuadProgram = this.createProgram(SELECTION_QUAD_SHADER, ['uCanvasSize', 'uSelectionCenter', 'uTranslate', 'uRotation', 'uScale', 'uSelectionTex', 'uDstTex', 'uImageOrigin', 'uImageSize', 'uImagePlacement']);
 
 		this.history = new TextureHistoryStack(this.gl, documentState.width, documentState.height);
 		this.allocateForDocument(documentState, () => {});
@@ -450,6 +457,207 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.selectionBounds = null;
 		this.selectionLayerName = null;
 	}
+	// adds a texture for a layer already appended to documentState.layers
+	// (extra layers). Incremental: existing layer content is untouched.
+	// Registers the addition as an undoable structural history entry.
+	addLayer(layer: OraLayer): void {
+		if (this.destroyed || this.layerTextures.has(layer.name)) {
+			return;
+		}
+		this.layerTextures.set(layer.name, createLayerTexture(this.gl, this.width, this.height));
+		const index = this.documentState.layers.findIndex((entry) => entry.name === layer.name);
+		this.history.pushAddLayer(layer, index === -1 ? this.documentState.layers.length - 1 : index);
+		this.renderBase();
+	}
+
+	// removes a layer's texture after the layer was removed from
+	// documentState.layers (extra layers), registering the removal as an
+	// undoable structural history entry. The texture's ownership transfers
+	// to the history entry so the removal can be undone. Note the map entry
+	// is deleted before the history entry takes ownership: a failure between
+	// those two steps would lose the texture, so keep them adjacent and
+	// side-effect free.
+	removeLayer(name: string): void {
+		if (this.destroyed) {
+			return;
+		}
+		const texture = this.layerTextures.get(name);
+		if (!texture) {
+			return;
+		}
+		const layer = this.documentState.layers.find((entry) => entry.name === name);
+		const index = this.documentState.layers.findIndex((entry) => entry.name === name);
+		if (this.selectionLayerName === name) {
+			this.selectionBounds = null;
+			this.selectionLayerName = null;
+		}
+		this.layerTextures.delete(name);
+		if (layer) {
+			this.history.pushRemoveLayer(layer, index === -1 ? 0 : index, texture);
+		} else {
+			// no metadata to record: the removal cannot be undone
+			destroyTexture(this.gl, texture);
+		}
+		this.renderBase();
+	}
+
+	// --- image placement (import) ------------------------------------------
+
+	// loads an image into a temporary full-canvas texture and starts the
+	// placement preview on the given layer
+	async beginImagePlacement(layer: OraLayer, imageDataUrl: string): Promise<SelectionBounds | null> {
+		if (this.destroyed || this.currentStroke || this.imagePlacement) {
+			return null;
+		}
+		const image = new Image();
+		image.src = imageDataUrl;
+		try {
+			await image.decode();
+		} catch {
+			// corrupt or unreadable file: let the caller show its notice
+			return null;
+		}
+		// rasterize at natural resolution (clamped to the texture size limit)
+		// so transforms sample the original pixels rather than a doc-bounded copy
+		const maxSide = Math.min(4096, Number(this.gl.getParameter(this.gl.MAX_TEXTURE_SIZE)) || 4096);
+		const naturalWidth = image.naturalWidth || maxSide;
+		const naturalHeight = image.naturalHeight || maxSide;
+		const fit = Math.min(1, maxSide / naturalWidth, maxSide / naturalHeight);
+		const width = Math.max(1, Math.round(naturalWidth * fit));
+		const height = Math.max(1, Math.round(naturalHeight * fit));
+		const texture = createLayerTexture(this.gl, width, height);
+		const raster = createEl('canvas');
+		raster.width = width;
+		raster.height = height;
+		const context = raster.getContext('2d');
+		if (!context) {
+			destroyTexture(this.gl, texture);
+			return null;
+		}
+		context.imageSmoothingQuality = 'high';
+		context.drawImage(image, 0, 0, width, height);
+		writeCanvasToTexture(this.gl, texture, raster, width, height);
+		// mipmaps so shrinking the image during placement stays clean
+		this.gl.bindTexture(this.gl.TEXTURE_2D, texture.texture);
+		this.gl.generateMipmap(this.gl.TEXTURE_2D);
+		this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+		const liveTex = this.layerTextures.get(layer.name);
+		if (liveTex) {
+			copyTexture(this.gl, liveTex, this.baselineTex, this.width, this.height);
+		}
+		this.computeLayerCaches(layer);
+		const bounds: SelectionBounds = {
+			left: Math.round((this.width - width) / 2),
+			top: Math.round((this.height - height) / 2),
+			width,
+			height,
+		};
+		this.imagePlacement = { layerName: layer.name, imageTexture: texture, bounds };
+		this.drawImagePlacementPreview(layer, { ...DEFAULT_SELECTION_TRANSFORM });
+		return bounds;
+	}
+
+	hasImagePlacement(): boolean {
+		return this.imagePlacement !== null;
+	}
+
+	// renders the layer with the transformed image over it (same present
+	// plumbing as the stroke preview, including the multiply-above path)
+	drawImagePlacementPreview(layer: OraLayer, transform: SelectionTransform): void {
+		if (this.destroyed || !this.imagePlacement || this.imagePlacement.layerName !== layer.name) {
+			return;
+		}
+		copyTexture(this.gl, this.baselineTex, this.previewComposeTex, this.width, this.height);
+		this.runImageQuadPass(this.previewComposeTex, transform);
+		if (this.activeLayerHasMultiplyAbove) {
+			this.compositeLayerStackWithSubstitution(this.documentState.layers, layer.name, this.previewComposeTex, this.scratchA, this.scratchB);
+			this.presentComposite();
+		} else {
+			const opacity = layer.opacity / 100;
+			const blendMode = layer.blendMode === 'multiply' ? 1 : 0;
+			this.runStrokePreviewPass(this.belowCacheTex, this.previewComposeTex, this.aboveCacheTex, opacity, blendMode);
+			this.blit(this.displayTex);
+		}
+	}
+
+	// bakes the transformed image into the live layer texture, snapshotting
+	// the affected region first so the apply is undoable
+	commitImagePlacement(layer: OraLayer, transform: SelectionTransform): void {
+		if (this.destroyed || !this.imagePlacement || this.imagePlacement.layerName !== layer.name) {
+			return;
+		}
+		const liveTex = this.layerTextures.get(layer.name);
+		if (!liveTex) {
+			this.cancelImagePlacement();
+			return;
+		}
+		let left = Infinity;
+		let top = Infinity;
+		let right = -Infinity;
+		let bottom = -Infinity;
+		for (const corner of getTransformedCorners(this.imagePlacement.bounds, transform)) {
+			left = Math.min(left, corner.x);
+			top = Math.min(top, corner.y);
+			right = Math.max(right, corner.x);
+			bottom = Math.max(bottom, corner.y);
+		}
+		left = Math.max(0, Math.floor(left));
+		top = Math.max(0, Math.floor(top));
+		right = Math.min(this.width, Math.ceil(right));
+		bottom = Math.min(this.height, Math.ceil(bottom));
+		if (right > left && bottom > top) {
+			this.history.beginStroke(layer.name);
+			this.history.commitStroke(layer.name, liveTex, { x: left, y: top, width: right - left, height: bottom - top });
+			this.runImageQuadPass(liveTex, transform);
+			this.onChange?.();
+		}
+		this.cancelImagePlacement();
+	}
+
+	// discards the placement without touching the layer
+	cancelImagePlacement(): void {
+		if (!this.imagePlacement) {
+			return;
+		}
+		destroyTexture(this.gl, this.imagePlacement.imageTexture);
+		this.imagePlacement = null;
+		this.renderBase();
+	}
+
+	// renders the placement image transformed (translate/rotate/scale about
+	// the placement center) onto the target, compositing over its contents
+	private runImageQuadPass(target: GpuTexture, transform: SelectionTransform): void {
+		if (!this.imagePlacement) {
+			return;
+		}
+		const bounds = this.imagePlacement.bounds;
+		const centerX = bounds.left + bounds.width / 2;
+		const centerY = bounds.top + bounds.height / 2;
+		copyTexture(this.gl, target, this.scratchA, this.width, this.height);
+		copyTexture(this.gl, target, this.scratchB, this.width, this.height);
+		this.bindTarget(this.scratchB, null, null);
+		this.gl.useProgram(this.selectionQuadProgram.program);
+		this.gl.uniform2f(this.uniform(this.selectionQuadProgram, 'uCanvasSize'), this.width, this.height);
+		this.gl.uniform2f(this.uniform(this.selectionQuadProgram, 'uSelectionCenter'), centerX, centerY);
+		this.gl.uniform1f(this.uniform(this.selectionQuadProgram, 'uImagePlacement'), 1.0);
+		this.gl.uniform2f(this.uniform(this.selectionQuadProgram, 'uImageOrigin'), bounds.left, bounds.top);
+		this.gl.uniform2f(this.uniform(this.selectionQuadProgram, 'uImageSize'), bounds.width, bounds.height);
+		
+		const translationOnly = this.isTranslationOnlySelectionTransform(transform);
+		const translateX = translationOnly ? Math.round(transform.translateX) : transform.translateX;
+		const translateY = translationOnly ? Math.round(transform.translateY) : transform.translateY;
+		this.gl.uniform2f(this.uniform(this.selectionQuadProgram, 'uTranslate'), translateX, translateY);
+		this.gl.uniform1f(this.uniform(this.selectionQuadProgram, 'uRotation'), transform.rotation);
+		this.gl.uniform2f(this.uniform(this.selectionQuadProgram, 'uScale'), transform.scaleX, transform.scaleY);
+		this.bindTexture(0, this.imagePlacement.imageTexture, translationOnly ? this.nearestSampler : this.mipmapSampler);
+		this.bindTexture(1, this.scratchA, this.nearestSampler);
+		this.gl.uniform1i(this.uniform(this.selectionQuadProgram, 'uSelectionTex'), 0);
+		this.gl.uniform1i(this.uniform(this.selectionQuadProgram, 'uDstTex'), 1);
+		this.gl.bindVertexArray(this.emptyVao);
+		this.gl.drawArrays(this.gl.TRIANGLES, 0, 6);
+		this.cleanupDrawState();
+		copyTexture(this.gl, this.scratchB, target, this.width, this.height);
+	}
 
 	// true when the selection hasn't been moved, rotated, or scaled 
 	private isIdentitySelectionTransform(transform: SelectionTransform): boolean {
@@ -509,11 +717,20 @@ export class GpuStrokeEngine implements DrawingEngine {
 	}
 
 	undo(): void {
-		this.history.undo(this.layerTextures);
+		this.history.undo(this.layerTextures, this.documentState);
+		this.pruneMissingSelection();
 	}
 
 	redo(): void {
-		this.history.redo(this.layerTextures);
+		this.history.redo(this.layerTextures, this.documentState);
+		this.pruneMissingSelection();
+	}
+
+	private pruneMissingSelection(): void {
+		if (this.selectionLayerName && !this.documentState.layers.some((entry) => entry.name === this.selectionLayerName)) {
+			this.selectionBounds = null;
+			this.selectionLayerName = null;
+		}
 	}
 
 	destroy(): void {
@@ -538,6 +755,10 @@ export class GpuStrokeEngine implements DrawingEngine {
 		if (this.instanceBuffer) {
 			this.gl.deleteBuffer(this.instanceBuffer);
 			this.instanceBuffer = null;
+		}
+		if (this.imagePlacement) {
+			destroyTexture(this.gl, this.imagePlacement.imageTexture);
+			this.imagePlacement = null;
 		}
 		this.history.clear();
 		this.deleteProgram(this.stampProgram);
@@ -579,6 +800,10 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.destroyOwnedTexture(this.predictedBackupTex);
 		this.selectionBounds = null;
 		this.selectionLayerName = null;
+		if (this.imagePlacement) {
+			destroyTexture(this.gl, this.imagePlacement.imageTexture);
+			this.imagePlacement = null;
+		}
 
 		this.scratchA = createLayerTexture(this.gl, this.width, this.height);
 		this.scratchB = createLayerTexture(this.gl, this.width, this.height);
@@ -609,13 +834,13 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.history.resize(this.width, this.height);
 	}
 
-	private createSampler(filter: number): WebGLSampler {
+	private createSampler(filter: number, magFilter = filter): WebGLSampler {
 		const sampler = this.gl.createSampler();
 		if (!sampler) {
 			throw new Error('Unable to create WebGL sampler');
 		}
 		this.gl.samplerParameteri(sampler, this.gl.TEXTURE_MIN_FILTER, filter);
-		this.gl.samplerParameteri(sampler, this.gl.TEXTURE_MAG_FILTER, filter);
+		this.gl.samplerParameteri(sampler, this.gl.TEXTURE_MAG_FILTER, magFilter);
 		this.gl.samplerParameteri(sampler, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
 		this.gl.samplerParameteri(sampler, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
 		return sampler;
@@ -681,6 +906,17 @@ export class GpuStrokeEngine implements DrawingEngine {
 		if (texture) {
 			destroyTexture(this.gl, texture);
 		}
+	}
+
+	// recomputes the stroke preview caches (below/above composites) for the given layer after a structural layer change
+	refreshPreviewCaches(layer: OraLayer): void {
+		if (this.destroyed || this.currentStroke) {
+			return;
+		}
+		if (!this.documentState.layers.some((entry) => entry.name === layer.name)) {
+			return;
+		}
+		this.computeLayerCaches(layer);
 	}
 
 	private computeLayerCaches(layer: OraLayer): void {
@@ -944,6 +1180,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.gl.uniform2f(this.uniform(this.selectionQuadProgram, 'uCanvasSize'), this.width, this.height);
 		this.gl.uniform2f(this.uniform(this.selectionQuadProgram, 'uSelectionCenter'), centerX, centerY);
 
+		this.gl.uniform1f(this.uniform(this.selectionQuadProgram, 'uImagePlacement'), 0.0);
 		// snap selection to nearest pixel if it's only being moved
 		const translationOnly = this.isTranslationOnlySelectionTransform(transform);
 		const translateX = translationOnly ? Math.round(transform.translateX) : transform.translateX;

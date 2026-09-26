@@ -25,20 +25,45 @@ export class SelectionController {
 	selectionTransform: SelectionTransform = { ...DEFAULT_SELECTION_TRANSFORM };
 	isLassoDrawing = false;
 	selectionDrag: SelectionDragStart | null = null;
+	// touch lasso: first-finger commit deferred until the gesture is known not
+	// to be a view gesture (a second finger may still join); cleared on
+	// release/cancel alongside the provisional polygon
+	private pendingTouchCommitOut = false;
+	private pendingTouchCommitPoint: Point | null = null;
+	private pendingTouchSelectionPolygon: Point[] | null = null;
 
 	constructor(private readonly deps: SelectionControllerDeps) {}
 
 	handleLassoPointerDown(event: PointerEvent): void {
 		const point = this.deps.viewport.getPoint(event);
 		if (this.selectionActive && this.selectionBounds) {
+			// Preserve the persistent marching-ants polygon before any touch
+			// interaction can mutate it. A second finger may turn this into a
+			// view gesture, in which case the original selection must be
+			// restored rather than leaving an empty outline.
+			if (event.pointerType === 'touch') {
+				this.pendingTouchSelectionPolygon = this.selectionPolygon.map((selectionPoint) => ({ ...selectionPoint }));
+			}
 			const hit = hitTestSelection(point, this.selectionBounds, this.selectionTransform, this.deps.viewport.view.zoom);
 			if (hit !== 'none') {
+				this.pendingTouchCommitOut = false;
+				this.pendingTouchCommitPoint = null;
 				this.selectionDrag = { mode: hit, pointerDoc: point, transform: { ...this.selectionTransform } };
 				this.deps.canvas.setPointerCapture(event.pointerId);
 				return;
 			}
 			// click outside the current selection to apply it then start a fresh lasso capture from this same point.
-			this.commitSelection();
+			// for touch the commit is deferred (see handleTouchLassoPointerUpTouch /
+			// discardPendingTouchPointer): the contact may turn out to be the start
+			// of a multi-finger view gesture, and a nondestructive gesture must not
+			// bake the selection. Mouse/pen commit synchronously as before.
+			if (event.pointerType === 'touch') {
+				this.pendingTouchCommitOut = true;
+				this.pendingTouchCommitPoint = { ...point };
+				this.pendingTouchSelectionPolygon = this.selectionPolygon.map((selectionPoint) => ({ ...selectionPoint }));
+			} else {
+				this.commitSelection();
+			}
 		}
 		this.isLassoDrawing = true;
 		this.selectionPolygon = [point];
@@ -64,9 +89,18 @@ export class SelectionController {
 
 	handleLassoPointerUp(event: PointerEvent): void {
 		this.deps.canvas.releasePointerCapture(event.pointerId);
+		if (event.type === 'pointercancel') {
+			// touch interrupted mid-gesture: discard any deferred commit and
+			// the provisional polygon, keeping the surviving selection intact
+			this.discardPendingTouchPointer();
+			return;
+		}
 		if (this.selectionDrag) {
 			this.selectionDrag = null;
 			return;
+		}
+		if (event.pointerType === 'touch') {
+			this.handleTouchLassoPointerUpTouch();
 		}
 		if (!this.isLassoDrawing) {
 			return;
@@ -99,6 +133,66 @@ export class SelectionController {
 			throw new Error(`Layer ${this.deps.getActiveLayer()} not found`);
 		}
 		return layer;
+	}
+
+	// touch lasso: the down missed an active selection, but the contact may
+	// still turn out to be a single-finger tap-outside. By release time a
+	// second finger would have joined (making it a view gesture), so a
+	// pending commit here means the gesture was a genuine tap-outside.
+	private handleTouchLassoPointerUpTouch(): void {
+		if (!this.pendingTouchCommitOut) {
+			return;
+		}
+		// Preserve the full provisional path across commitSelection(), which
+		// clears controller state. A tap has one point and is discarded below;
+		// a genuine one-finger drag can still create a new selection.
+		const polygon = this.selectionPolygon.length > 0
+			? this.selectionPolygon.map((point) => ({ ...point }))
+			: this.pendingTouchCommitPoint
+				? [{ ...this.pendingTouchCommitPoint }]
+				: [];
+		this.pendingTouchCommitOut = false;
+		this.pendingTouchCommitPoint = null;
+		this.pendingTouchSelectionPolygon = null;
+		this.commitSelection();
+		this.isLassoDrawing = polygon.length > 0;
+		this.selectionPolygon = polygon;
+	}
+
+	// touch lasso: a view gesture actually started, so discard the deferred
+	// commit and the provisional polygon. The surviving selection is repainted
+	// so the overlay matches the document.
+	discardPendingTouchPointer(): void {
+		// The gesture callback can run without a lasso interaction having
+		// started (for example, the second finger lands on a panel gesture).
+		// Do not clear an already-stable selection in that case.
+		const hadPendingInteraction = this.isLassoDrawing
+			|| this.selectionDrag !== null
+			|| this.pendingTouchCommitOut
+			|| this.pendingTouchCommitPoint !== null
+			|| this.pendingTouchSelectionPolygon !== null;
+		if (!hadPendingInteraction) {
+			return;
+		}
+
+		const savedPolygon = this.pendingTouchSelectionPolygon;
+		const savedTransform = this.selectionDrag?.transform;
+		this.pendingTouchCommitOut = false;
+		this.pendingTouchCommitPoint = null;
+		this.isLassoDrawing = false;
+		this.selectionPolygon = savedPolygon?.map((point) => ({ ...point })) ?? [];
+		this.pendingTouchSelectionPolygon = null;
+		// A first finger may have grabbed a handle before the second finger
+		// arrived. Revert that provisional transform and leave the original
+		// selection active.
+		if (savedTransform) {
+			this.selectionTransform = { ...savedTransform };
+		}
+		this.selectionDrag = null;
+		// The provisional lasso path may have been painted over the surviving
+		// selection gizmo. Clear it before repainting the retained selection.
+		clearSelectionOverlay(this.deps.selectionCanvas);
+		this.updateSelectionPreview();
 	}
 
 	updateSelectionPreview(): void {
@@ -171,6 +265,9 @@ export class SelectionController {
 		this.selectionDrag = null;
 		this.isLassoDrawing = false;
 		this.selectionTransform = { ...DEFAULT_SELECTION_TRANSFORM };
+		this.pendingTouchCommitOut = false;
+		this.pendingTouchCommitPoint = null;
+		this.pendingTouchSelectionPolygon = null;
 		clearSelectionOverlay(this.deps.selectionCanvas);
 	}
 }

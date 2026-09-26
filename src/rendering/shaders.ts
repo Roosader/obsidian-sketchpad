@@ -303,11 +303,29 @@ export const SELECTION_QUAD_SHADER: ShaderSource = {
 	uniform sampler2D uSelectionTex;
 	uniform sampler2D uDstTex;
 	uniform vec2 uCanvasSize;
+	uniform vec2 uImageOrigin;
+	uniform vec2 uImageSize;
+	uniform float uImagePlacement;
 
 	layout(location = 0) out vec4 outColor;
 
 	void main() {
-		vec4 srcPremultiplied = texture(uSelectionTex, vUv);
+		vec4 srcPremultiplied;
+		if (uImagePlacement > 0.5) {
+			// vUv is doc-space with a flipped Y; recover top-origin doc pixels
+			vec2 docPos = vec2(vUv.x * uCanvasSize.x, (1.0 - vUv.y) * uCanvasSize.y);
+			vec2 imgUv = vec2(
+				(docPos.x - uImageOrigin.x) / uImageSize.x,
+				1.0 - (docPos.y - uImageOrigin.y) / uImageSize.y
+			);
+			if (imgUv.x < 0.0 || imgUv.y < 0.0 || imgUv.x > 1.0 || imgUv.y > 1.0) {
+				outColor = texture(uDstTex, gl_FragCoord.xy / uCanvasSize);
+				return;
+			}
+			srcPremultiplied = texture(uSelectionTex, imgUv);
+		} else {
+			srcPremultiplied = texture(uSelectionTex, vUv);
+		}
 		vec2 dstUv = gl_FragCoord.xy / uCanvasSize;
 		vec4 dst = texture(uDstTex, dstUv);
 		if (srcPremultiplied.a <= 0.0) {

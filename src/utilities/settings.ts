@@ -1,68 +1,41 @@
 import { PluginSettingTab, Setting, setIcon } from 'obsidian';
 import SketchpadPlugin from '../main';
-import type { LayerName, ViewTool, RotateAction, SizeAction } from './types';
+import type { LayerName, RotateAction, SizeAction, ViewTool } from './types';
 import { MODIFIER_HOTKEY_KEYS, MIN_ROTATE_SENSITIVITY, MAX_ROTATE_SENSITIVITY, DEFAULT_FILE_NAME, DEFAULT_IMAGE_WIDTH, DEFAULT_IMAGE_HEIGHT, MAX_IMAGE_DIMENSION, MAX_GRID_SIZE, AUTOSAVE_INTERVAL_OPTIONS, DEFAULT_PREDICTION_DISTANCE_MS, MIN_PREDICTION_DISTANCE_MS, MAX_PREDICTION_DISTANCE_MS, MIN_PREDICTION_SENSITIVITY, MAX_PREDICTION_SENSITIVITY, DEFAULT_PREDICTION_SENSITIVITY } from './constants';
-import {normalizeHotkeyKey} from './utils';
+import { normalizeHotkeyKey } from './utils';
+import { ConfirmModal, type ConfirmChoice } from '../modals/confirm-modal';
+import {
+    ROTATE_HOTKEY_ACTIONS,
+    ROTATE_HOTKEY_LABELS,
+    SIZE_HOTKEY_ACTIONS,
+    SIZE_HOTKEY_LABELS,
+    TOOL_HOTKEY_LABELS,
+    TOOL_HOTKEY_TOOLS,
+    clearHotkey,
+    describeHotkeyOwner,
+    displayHotkeyKey,
+    findHotkeyOwner,
+    readHotkey,
+    sameHotkeyOwner,
+    unbindHotkeyOwner,
+    writeHotkey,
+    type HotkeyBindings,
+    type HotkeyOwner,
+} from './hotkeys';
 
 const IGNORED_HOTKEY_KEYS = new Set([
 	'CapsLock', 'Escape', 'Tab',
 	'Process', 'Dead', 'AltGraph', 'NumLock', 'ScrollLock',
 ]);
 
-const TOOL_HOTKEY_TOOLS: ViewTool[] = [
-	'pencil', 'pen', 'brush', 'eraser', 'hand', 'lasso', 'rotate',
-	'zoom-in', 'zoom-out', 'eyedropper',
-];
-
-const TOOL_HOTKEY_LABELS: Partial<Record<ViewTool, string>> = {
-	pencil: 'Pencil',
-	pen: 'Pen',
-	brush: 'Brush',
-	eraser: 'Eraser',
-	hand: 'Hand',
-	lasso: 'Lasso',
-	rotate: 'Rotate',
-	'zoom-in': 'Zoom in',
-	'zoom-out': 'Zoom out',
-	eyedropper: 'Eyedropper',
-};
-
-const ROTATE_HOTKEY_ACTIONS: RotateAction[] = ['rotate-ccw', 'rotate-cw'];
-
-const ROTATE_HOTKEY_LABELS: Partial<Record<RotateAction, string>> = {
-	'rotate-ccw': 'Rotate counter-clockwise',
-	'rotate-cw': 'Rotate clockwise',
-};
-
-const SIZE_HOTKEY_ACTIONS: SizeAction[] = ['size-increase', 'size-decrease'];
-
-const SIZE_HOTKEY_LABELS: Partial<Record<SizeAction, string>> = {
-	'size-increase': 'Increase tool tip size',
-	'size-decrease': 'Decrease tool tip size',
-};
-
-function displayHotkey(key: string): string {
-	if (key === ' ') {
-		return 'Space';
-	}
-	if (key === 'Shift') {
-		return 'Shift';
-	}
-	if (key === 'Control') {
-		return 'Ctrl';
-	}
-	if (key === 'Alt') {
-		return 'Alt';
-	}
-	if (key === 'Meta') {
-		return 'Cmd';
-	}
-	return key.length === 1 ? key.toUpperCase() : key;
-}
-
 export class SketchpadSettingTab extends PluginSettingTab 
 {
     plugin: SketchpadPlugin;
+
+    private readonly hotkeyRefreshers = new Set<() => void>();
+
+    // True while a key-conflict dialog is open
+    private hotkeyDecisionPending = false;
 
     constructor(plugin: SketchpadPlugin) {
         super(plugin.app, plugin);
@@ -71,6 +44,7 @@ export class SketchpadSettingTab extends PluginSettingTab
     display(): void {
         const { containerEl } = this;
         containerEl.empty();
+        this.hotkeyRefreshers.clear();
 
         new Setting(containerEl)
             .setName('Enable touch to draw')
@@ -452,54 +426,63 @@ export class SketchpadSettingTab extends PluginSettingTab
     private addToolHotkeySetting(containerEl: HTMLElement, tool: ViewTool): void {
         this.addHotkeySetting(
             containerEl,
+            { kind: 'tool', tool },
             TOOL_HOTKEY_LABELS[tool] ?? tool,
-            () => this.plugin.toolHotkeys[tool],
-            (key) => { this.plugin.toolHotkeys[tool] = key; },
-            () => { delete this.plugin.toolHotkeys[tool]; },
         );
     }
 
     private addRotateHotkeySetting(containerEl: HTMLElement, action: RotateAction): void {
         this.addHotkeySetting(
             containerEl,
+            { kind: 'rotate', action },
             ROTATE_HOTKEY_LABELS[action] ?? action,
-            () => this.plugin.rotateHotkeys[action],
-            (key) => { this.plugin.rotateHotkeys[action] = key; },
-            () => { delete this.plugin.rotateHotkeys[action]; },
         );
     }
 
     private addSizeHotkeySetting(containerEl: HTMLElement, action: SizeAction): void {
         this.addHotkeySetting(
             containerEl,
+            { kind: 'size', action },
             SIZE_HOTKEY_LABELS[action] ?? action,
-            () => this.plugin.sizeHotkeys[action],
-            (key) => { this.plugin.sizeHotkeys[action] = key; },
-            () => { delete this.plugin.sizeHotkeys[action]; },
         );
     }
 
-    private addHotkeySetting(
-        containerEl: HTMLElement,
-        name: string,
-        getCurrent: () => string | undefined,
-        commit: (key: string) => void,
-        clear: () => void,
-    ): void {
+    // Live view of the bindings the settings tab edits. The objects are the
+    // plugin's own, so writes through the hotkey helpers mutate the plugin.
+    private bindings(): HotkeyBindings {
+        return {
+            toolHotkeys: this.plugin.toolHotkeys,
+            rotateHotkeys: this.plugin.rotateHotkeys,
+            sizeHotkeys: this.plugin.sizeHotkeys,
+        };
+    }
+
+    private refreshAllHotkeyRows(): void {
+        for (const refresh of this.hotkeyRefreshers) {
+            refresh();
+        }
+    }
+
+    private addHotkeySetting(containerEl: HTMLElement, owner: HotkeyOwner, name: string): void {
         new Setting(containerEl)
             .setName(name)
             .addText((text) => {
                 text.setPlaceholder('None');
                 text.inputEl.readOnly = true;
                 const refresh = (): void => {
-                    const current = getCurrent();
-                    text.inputEl.value = current ? displayHotkey(current) : '';
+                    const current = readHotkey(this.bindings(), owner);
+                    text.inputEl.value = current ? displayHotkeyKey(current) : '';
                 };
                 refresh();
+                // Registered so a rebind anywhere in the list can update this row.
+                this.hotkeyRefreshers.add(refresh);
                 text.inputEl.addClass('sketchpad-hotkey-input');
 
                 let capturing = false;
                 text.inputEl.addEventListener('focus', () => {
+                    if (this.hotkeyDecisionPending) {
+                        return;
+                    }
                     capturing = true;
                     text.inputEl.value = '';
                 });
@@ -508,15 +491,15 @@ export class SketchpadSettingTab extends PluginSettingTab
                     refresh();
                 });
                 text.inputEl.addEventListener('keydown', (event) => {
-                    if (!capturing) {
+                    if (!capturing || this.hotkeyDecisionPending) {
                         return;
                     }
                     event.preventDefault();
                     event.stopPropagation();
                     // Backspace / Delete clears the binding.
                     if (event.key === 'Backspace' || event.key === 'Delete') {
-                        clear();
-                        text.inputEl.value = '';
+                        clearHotkey(this.bindings(), owner);
+                        this.refreshAllHotkeyRows();
                         text.inputEl.blur();
                         void this.plugin.saveToolSettings();
                         return;
@@ -527,7 +510,7 @@ export class SketchpadSettingTab extends PluginSettingTab
                     }
                     // Modifier keys are valid standalone bindings
                     if (MODIFIER_HOTKEY_KEYS.has(key)) {
-                        this.bindHotkey(key, commit, text.inputEl);
+                        void this.bindHotkey(key, owner, text.inputEl);
                         return;
                     }
                     // Regular keys - only bind single characters with no modifiers held.
@@ -537,7 +520,7 @@ export class SketchpadSettingTab extends PluginSettingTab
                     if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) {
                         return;
                     }
-                    this.bindHotkey(key, commit, text.inputEl);
+                    void this.bindHotkey(key, owner, text.inputEl);
                 });
                 // Keep the caret from appearing in the read-only-looking field.
                 text.inputEl.addEventListener('click', (event) => {
@@ -546,26 +529,39 @@ export class SketchpadSettingTab extends PluginSettingTab
             });
     }
 
-    private bindHotkey(key: string, commit: (key: string) => void, inputEl: HTMLInputElement): void {
-        // hotkey must be unique across every tool and action
-        for (const other of TOOL_HOTKEY_TOOLS) {
-            if (this.plugin.toolHotkeys[other] === key) {
-                delete this.plugin.toolHotkeys[other];
+    // hoteky must be unique across every tool and action
+    private async bindHotkey(key: string, owner: HotkeyOwner, inputEl: HTMLInputElement): Promise<void> {
+        const existing = findHotkeyOwner(this.bindings(), key);
+        if (existing && !sameHotkeyOwner(existing, owner)) {
+            const move = await this.confirmHotkeyMove(key, existing, owner);
+            if (!move) {
+                this.refreshAllHotkeyRows();
+                inputEl.blur();
+                return;
             }
+            unbindHotkeyOwner(this.bindings(), existing);
         }
-        for (const action of ROTATE_HOTKEY_ACTIONS) {
-            if (this.plugin.rotateHotkeys[action] === key) {
-                delete this.plugin.rotateHotkeys[action];
-            }
-        }
-        for (const action of SIZE_HOTKEY_ACTIONS) {
-            if (this.plugin.sizeHotkeys[action] === key) {
-                delete this.plugin.sizeHotkeys[action];
-            }
-        }
-        commit(key);
-        inputEl.value = displayHotkey(key);
+        writeHotkey(this.bindings(), owner, key);
+        this.refreshAllHotkeyRows();
         inputEl.blur();
         void this.plugin.saveToolSettings();
+    }
+
+    private async confirmHotkeyMove(key: string, existing: HotkeyOwner, target: HotkeyOwner): Promise<boolean> {
+        this.hotkeyDecisionPending = true;
+        try {
+            const choice = await new Promise<ConfirmChoice>((resolve) => {
+                new ConfirmModal(
+                    this.app,
+                    `"${displayHotkeyKey(key)}" is already assigned to ${describeHotkeyOwner(existing)}. Reassign it to ${describeHotkeyOwner(target)}?`,
+                    resolve,
+                    'Reassign',
+                    'Keep as is',
+                ).open();
+            });
+            return choice === 'yes';
+        } finally {
+            this.hotkeyDecisionPending = false;
+        }
     }
 }

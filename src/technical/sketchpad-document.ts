@@ -36,27 +36,33 @@ export function normalizeDocument(input?: Partial<OraDocument> | null): OraDocum
 		};
 	};
 
-	const byName = new Map<LayerName, Partial<OraLayer>>();
-	const ordered: LayerName[] = [];
+	const byName = new Map<string, Partial<OraLayer>>();
+	const order: string[] = [];
+	const usedNames = new Set<string>();
 	for (const layer of inputLayers) {
-		const name = layer && typeof layer.name === 'string' ? layer.name : undefined;
-		if (!name || !FIXED_LAYER_NAMES.includes(name) || byName.has(name)) {
+		const rawName = layer && typeof layer.name === 'string' ? layer.name : undefined;
+		const name = rawName?.trim();
+		if (!name) {
 			continue;
 		}
-		byName.set(name, layer);
-		if (name !== 'Paper') {
-			ordered.push(name);
-		}
+		const unique = uniquifyLayerName(name, usedNames);
+		usedNames.add(unique);
+		byName.set(unique, layer);
+		order.push(unique);
 	}
 	// Append any fixed layers missing from the input, in the default order.
 	for (const name of FIXED_LAYER_NAMES) {
-		if (name !== 'Paper' && !byName.has(name)) {
-			ordered.push(name);
+		if (!byName.has(name)) {
+			order.push(name);
 		}
 	}
 
+	// Paper stays at the bottom of the stack; every other layer (extra
+	// layers included) keeps its relative order.
 	const paper = normalizeLayer(byName.get('Paper'), 'Paper');
-	const nonPaper = ordered.map((name) => normalizeLayer(byName.get(name), name));
+	const nonPaper = order
+		.filter((entry) => entry !== 'Paper')
+			.map((name) => normalizeLayer(byName.get(name), name));
 
 	return {
 		version: 1,
@@ -112,4 +118,47 @@ export function applyDefaultLayerOrder(layers: OraLayer[], order: LayerName[]): 
 		return [paper, ...result.filter((layer) => layer.name !== 'Paper')];
 	}
 	return result;
+}
+
+
+// true for the four built-in layers (Paper/Sketch/Ink/Paint)
+export function isFixedLayerName(name: string): boolean {
+	return (FIXED_LAYER_NAMES as string[]).includes(name);
+}
+
+// returns the name for the next extra layer: the first unused number in
+// Extra 1, Extra 2, ... (fills gaps instead of always appending after the max)
+export function nextExtraLayerName(layers: OraLayer[]): LayerName {
+	const used = new Set<number>();
+	const pattern = /^Extra (\d+)$/;
+	for (const layer of layers) {
+		const match = pattern.exec(layer.name);
+		if (match) {
+			used.add(Number.parseInt(match[1] ?? '0', 10));
+		}
+	}
+	let candidate = 1;
+	while (used.has(candidate)) {
+		candidate += 1;
+	}
+	return `Extra ${candidate}`;
+}
+
+// number of non-fixed (extra) layers in the document
+export function countExtraLayers(layers: OraLayer[]): number {
+	return layers.filter((layer) => !isFixedLayerName(layer.name)).length;
+}
+
+// returns `name`, or `name (2)`, `name (3)`, ... until unique against the
+// given set of taken names. Used to preserve duplicate-named layers on
+// import instead of dropping their content.
+export function uniquifyLayerName(name: string, used: Set<string>): LayerName {
+	if (!used.has(name)) {
+		return name;
+	}
+	let counter = 2;
+	while (used.has(`${name} (${counter})`)) {
+		counter += 1;
+	}
+	return `${name} (${counter})`;
 }

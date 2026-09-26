@@ -1,6 +1,7 @@
 import { App, Modal, Notice, TFile } from 'obsidian';
 import { getThumbnailDataUrl } from '../ora/ora-parser';
 import { FolderTreeBrowser } from '../ui/folder-tree-browser';
+import { createConcurrencyQueue, createThumbnailObserver } from '../ui/thumbnail-queue';
 import { blurControlFocusHandler } from '../utilities/utils';
 
 export interface OpenFileChoice {
@@ -15,6 +16,8 @@ export default class OpenFileModal extends Modal {
     private selectedFile: TFile | null = null;
     private readonly thumbnailCache = new Map<string, string>();
     private renderToken = 0;
+    private thumbnailObserver: IntersectionObserver | null = null;
+    private readonly thumbnailQueue = createConcurrencyQueue(4);
 
     constructor(app: App, onChoose: (choice: OpenFileChoice | null) => void, defaultFolder?: string) {
         super(app);
@@ -57,6 +60,7 @@ export default class OpenFileModal extends Modal {
     private renderFiles(): void {
         this.renderToken += 1;
         this.selectedFile = null;
+        this.teardownThumbnailObserver();
         this.thumbnailGrid.empty();
 
         const folder = this.folderBrowser.getSelectedFolder();
@@ -74,13 +78,31 @@ export default class OpenFileModal extends Modal {
             return;
         }
 
+        const pendingLoads = new Map<Element, () => void>();
+        this.thumbnailObserver = createThumbnailObserver(this.thumbnailGrid, (target) => {
+            const load = pendingLoads.get(target);
+            pendingLoads.delete(target);
+            load?.();
+        });
+
         for (const file of oraFiles) {
             const card = this.thumbnailGrid.createDiv({ cls: 'sketchpad-file-thumbnail-card' });
             const img = card.createEl('img', { cls: 'sketchpad-file-thumbnail-img' });
             card.createDiv({ cls: 'sketchpad-file-thumbnail-name', text: file.basename });
             card.addEventListener('click', () => this.selectFile(card, file));
             card.addEventListener('dblclick', () => this.openFile(file));
-            void this.loadThumbnail(file, img);
+            // Files whose thumbnails are already cached render immediately;
+            // everything else loads once its card scrolls near the viewport.
+            if (this.thumbnailCache.has(file.path)) {
+                void this.loadThumbnail(file, img);
+                continue;
+            }
+            pendingLoads.set(card, () => {
+                if (img.isConnected) {
+                    this.thumbnailQueue.enqueue(() => this.loadThumbnail(file, img));
+                }
+            });
+            this.thumbnailObserver.observe(card);
         }
     }
 
@@ -99,10 +121,23 @@ export default class OpenFileModal extends Modal {
         this.close();
     }
 
+    onClose(): void {
+        this.renderToken += 1;
+        this.thumbnailQueue.clear();
+        this.teardownThumbnailObserver();
+        this.contentEl.empty();
+    }
+
+    private teardownThumbnailObserver(): void {
+        this.thumbnailObserver?.disconnect();
+        this.thumbnailObserver = null;
+    }
+
     private async loadThumbnail(file: TFile, img: HTMLImageElement): Promise<void> {
         const cached = this.thumbnailCache.get(file.path);
         if (cached) {
             img.setAttribute('src', cached);
+            img.addClass('is-loaded');
             return;
         }
         const token = this.renderToken;
@@ -113,6 +148,7 @@ export default class OpenFileModal extends Modal {
                 this.thumbnailCache.set(file.path, src);
                 if (img.isConnected && token === this.renderToken) {
                     img.setAttribute('src', src);
+                    img.addClass('is-loaded');
                 }
             } else {
                 img.addClass('is-empty');

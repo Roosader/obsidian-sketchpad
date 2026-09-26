@@ -1,7 +1,9 @@
 import { setIcon } from 'obsidian';
 import type { LayerName, ToolName, ViewTool } from '../utilities/types';
+import { isFixedLayerName } from '../technical/sketchpad-document';
 
 export interface ToolbarElements {
+	toolbar: HTMLDivElement;
 	toolButtons: HTMLButtonElement[];
 }
 
@@ -9,7 +11,7 @@ export function buildToolbar(
 	container: HTMLElement,
 	_plugin: unknown,
 	initialTool: ViewTool | null,
-	_getCurrentTool: () => ViewTool,
+	getCurrentTool: () => ViewTool,
 	onSelectTool: (tool: ViewTool) => void
 ): ToolbarElements {
 	const toolbar = container.createDiv({ cls: 'sketchpad-toolbar' });
@@ -19,7 +21,6 @@ export function buildToolbar(
 	const eyeDropperTool = markingTools.createEl('button', { cls: 'sketchpad-tool' });
 	setIcon(eyeDropperTool, 'pipette');
 	eyeDropperTool.dataset.tool = 'eyedropper';
-	eyeDropperTool.addEventListener('click', () => onSelectTool('eyedropper'));
 	toolButtons.push(eyeDropperTool);
 	
 	const lassoButton = markingTools.createEl('button', {
@@ -27,10 +28,9 @@ export function buildToolbar(
 	});
 	setIcon(lassoButton, 'lasso-select');
 	lassoButton.dataset.tool = 'lasso';
-	lassoButton.addEventListener('click', () => onSelectTool('lasso'));
 	toolButtons.push(lassoButton);
 
-	for (const tool of ['pencil', 'pen', 'brush', 'eraser'] as ToolName[]) {
+	for (const tool of ['pencil', 'pen', 'brush', 'eraser', 'marker'] as ToolName[]) {
 		const button = markingTools.createEl('button', {
 			cls: `sketchpad-tool${tool === initialTool ? ' active' : ''}`
 		});
@@ -48,10 +48,12 @@ export function buildToolbar(
 			case 'eraser':
 				setIcon(button, 'eraser');
 				break;
+			case 'marker':
+				setIcon(button, 'highlighter');
+				break;
 		}
 
 		button.dataset.tool = tool;
-		button.addEventListener('click', () => onSelectTool(tool));
 		toolButtons.push(button);
 	}
 
@@ -62,7 +64,6 @@ export function buildToolbar(
 	});
 	setIcon(handButton, 'hand');
 	handButton.dataset.tool = 'hand';
-	handButton.addEventListener('click', () => onSelectTool('hand'));
 	toolButtons.push(handButton);
 
 
@@ -71,7 +72,6 @@ export function buildToolbar(
 	});
 	setIcon(zoomInTool, 'zoom-in');
 	zoomInTool.dataset.tool = 'zoom-in';
-	zoomInTool.addEventListener('click', () => onSelectTool('zoom-in'));
 	toolButtons.push(zoomInTool);
 
 	const zoomOutTool = viewingTools.createEl('button', { 
@@ -79,7 +79,6 @@ export function buildToolbar(
 	});
 	setIcon(zoomOutTool, 'zoom-out');
 	zoomOutTool.dataset.tool = 'zoom-out';
-	zoomOutTool.addEventListener('click', () => onSelectTool('zoom-out'));
 	toolButtons.push(zoomOutTool);
 
 	const rotateTool = viewingTools.createEl('button', { 
@@ -87,10 +86,25 @@ export function buildToolbar(
 	});
 	setIcon(rotateTool, 'refresh-ccw');
 	rotateTool.dataset.tool = 'rotate';
-	rotateTool.addEventListener('click', () => onSelectTool('rotate'));
 	toolButtons.push(rotateTool);
 
-	return { toolButtons };
+	// Activate tools on pointer down
+	const toolButtonAt = (target: EventTarget | null): HTMLButtonElement | null => {
+		const element = target instanceof Element ? target.closest<HTMLElement>('button[data-tool]') : null;
+		return element instanceof HTMLButtonElement ? element : null;
+	};
+
+	toolbar.addEventListener('pointerdown', (event) => {
+		if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) {
+			return;
+		}
+		const button = toolButtonAt(event.target);
+		if (button === null || button.disabled) {
+			return;
+		}
+		onSelectTool(button.dataset.tool as ViewTool);
+	});
+	return { toolbar, toolButtons };
 }
 
 // Highlights whichever button matches activeTool.
@@ -109,7 +123,10 @@ export function syncToolbarToActiveLayer(elements: ToolbarElements, activeLayer:
 		Ink: 'pen',
 		Paint: 'brush',
 	};
-	const layerTool = activeLayer === null ? undefined : layerTools[activeLayer];
+	// extra layers have no dedicated tool: the marker draws on them
+	const layerTool = activeLayer === null
+		? undefined
+		: (layerTools[activeLayer] ?? (!isFixedLayerName(activeLayer) ? 'marker' : undefined));
 	for (const button of elements.toolButtons) {
 		button.classList.toggle('layer-active', layerTool !== undefined && button.dataset.tool === layerTool);
 	}
@@ -125,7 +142,7 @@ export function syncToolbarToLayerVisibility(
 		if (!tool) {
 			continue;
 		}
-		if (tool === 'pencil' || tool === 'pen' || tool === 'brush' || tool === 'eraser') {
+		if (tool === 'pencil' || tool === 'pen' || tool === 'brush' || tool === 'eraser' || tool === 'marker') {
 			button.disabled = !(enabledMap[tool] ?? true);
 		} else {
 			button.disabled = false;

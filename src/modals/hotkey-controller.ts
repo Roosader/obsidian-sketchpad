@@ -12,6 +12,8 @@ export interface HotkeyControllerDeps {
 	setTool: (tool: ViewTool) => void;
 	hasActiveSelection: () => boolean;
 	cancelSelection: () => void;
+	hasActiveImagePlacement?: () => boolean;
+	cancelImagePlacement?: () => void;
 	adjustToolSize: (delta: number) => void;
 }
 
@@ -26,9 +28,8 @@ export class HotkeyController {
 	constructor(private readonly deps: HotkeyControllerDeps) {}
 
 	handleKeyDown = (event: KeyboardEvent): void => {
-		if (event.key === 'Escape' && this.deps.hasActiveSelection()) {
-			event.preventDefault();
-			this.deps.cancelSelection();
+		if (event.key === 'Escape') {
+			this.handleEscapeKey(event);
 			return;
 		}
 
@@ -40,6 +41,26 @@ export class HotkeyController {
 		}
 		this.handleToolHotkeyDown(event);
 	};
+
+	// handles Escape while the sketchpad view is active
+	// prevents Escape from switching tab focus
+	// cancel an active selection/placement if there is one
+	private handleEscapeKey(event: KeyboardEvent): void {
+		if (!this.deps.isActive()) {
+			return;
+		}
+		if (document.body.querySelector('.modal-container')) {
+			return;
+		}
+		event.preventDefault();
+		event.stopPropagation();
+		if (this.deps.hasActiveSelection()) {
+			this.deps.cancelSelection();
+		}
+		if (this.deps.hasActiveImagePlacement?.()) {
+			this.deps.cancelImagePlacement?.();
+		}
+	}
 
 	handleKeyUp = (event: KeyboardEvent): void => {
 		this.stopRotateHold(event);

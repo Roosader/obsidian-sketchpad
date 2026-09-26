@@ -8,7 +8,7 @@ export const LAYER_FALLBACK_COLORS: Record<LayerName, string> = {
 };
 
 export function getLayerFallbackColor(layer: LayerName): string {
-	return LAYER_FALLBACK_COLORS[layer];
+	return LAYER_FALLBACK_COLORS[layer] ?? '#000000';
 }
 
 // get paper color from the paper layer's base image

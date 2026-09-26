@@ -1,31 +1,48 @@
 # Sketchpad
-![Sketchpad Screenshot](images/Sketchpad.png)
+![Sketchpad Screenshot](images/Sketchpad%201.1.0.png)
 
-A raster drawing plugin that aims to emulate the typical digital drawing experience with some inspiration from traditional sketching.
+A raster drawing plugin for [Obsidian MD](https://obsidian.md/) that aims to emulate the typical digital drawing experience with inspiration from traditional sketching.
 
 # Quick Start
-1. Install the plugin and enable it in Obsidian's Community plugins page.
+1. Install the plugin from the [Obsidian's Community page](https://community.obsidian.md/plugins/sketchpad) and enable it.
 2. Click the Sketchpad ribbon icon on the left sidebar to open a Sketchpad tab.
 3. Click the `New...` button on the header to create a sketch file and start drawing.
 
 # Usage
-Draw on a sketch file with 4 layers. Each layer is associated with its own drawing tool. If you pick a drawing tool, the layer linked with it automatically becomes active and vice versa. 
+Draw on a sketch file with 4 base layers with optional extra layers. Each layer is associated with its own drawing tool. If you pick a drawing tool, the layer linked with it automatically becomes active and vice versa.
 The layers and their associated tools are as follow:
 - Paint layer - brush tool.
 - Ink layer - pen tool.
 - Sketch layer - pencil tool.
-- Paper layer - base layer, can't be drawn on. Paper color is customizable.
+- Extra layers - marker tool.
+- Paper layer - bottom layer, can't be drawn on. Paper color is customizable.
+
+> [!IMPORTANT]
+> The marker tool can draw on any layer (except for paper), not just the extra layers.
 
 ## Layer settings
+![Layer settings on left sidebar](images/left-sidebar.png)
+
+*Layer action buttons from left to right: Delete layer, Add layer, Toggle layer reordering buttons, Toggle grid overlay*
+
 - **Blending mode**: Normal, Multiply (except for paper layer)
 - **Layer opacity slider**
 - **Visibility toggle**
+- **Adding layers**: up to 6 extra layers can be added.
+- **Deleting layers**: only the extra layers can be deleted.
 
 A grid overlay can be toggled on or off. The size, color, and opacity of the grid is customizable in the plugins's settings.
 
 The layers can be reordered except for the Paper layer which always remains at the bottom of the stack.
 
+
 ## Drawing tool settings
+![Top toolbar](images/toolbar.png)
+
+*Tools from left to right: Eyedropper, Lasso, Pencil, Pen, Brush, Eraser, Marker, Hand tool, Zoom in tool, Zoom out tool, Rotate tool*
+
+![Tool settings on right sidebar](images/right-sidebar.png)
+
 - **Color**: pick from a color picker that uses the [Okhsl color space by Björn Ottosson](https://bottosson.github.io/posts/colorpicker/).
 - **Size slider**: 1-200 pixels
     - With optional custom pressure curve.
@@ -33,6 +50,7 @@ The layers can be reordered except for the Paper layer which always remains at t
     - With optional custom pressure curve.
 - **Hardness slider**
 - **Blending Mode**: Normal, Replace Alpha, Compare Density
+- **Optional**: hide cursor when drawing. Cursor remains visible when hovering.
 
 > [!IMPORTANT]
 > Enable `Windows Ink` to have pressure sensitivity on Windows devices.
@@ -53,6 +71,7 @@ The layers can be reordered except for the Paper layer which always remains at t
 - Create and draw on `.ora` files, an open file format for graphics editors created by [OpenRaster](https://www.openraster.org/). 
     - Files created by this plugin can be opened by any application that supports `.ora` files such as Krita. 
     - Each layer is a png image that can be accessed by simply unzipping the `.ora` file.
+
 - Supports undo/redo up to 50 counts.
 - Supports autosave in 5-30 minutes interval.
 - Supports pointer/stroke prediction.
@@ -64,6 +83,11 @@ The layers can be reordered except for the Paper layer which always remains at t
 
 > [!IMPORTANT]
 > Enabling `Touch to draw` in the settings will make the one-finger gesture draw instead of panning the canvas. All other touch gestures remain the same.
+
+- Supports importing images from Obsidian vault into the layers of a sketch document.
+    - All image formats that Obsidian can rasterize can be imported. 
+    - Currently supports: `.avif`, `.bmp`, `.gif`, `.jpeg`, `.jpg`, `.png`, `.svg`, `.webp`
+    - Imported images are treated similarly to selections from the lasso tool and can be moved, resized, rotated before being baked to the target layer.
 
 - Export any sketch file as a png image.
 - Embed sketch files in notes with Wikilinks.
@@ -78,6 +102,7 @@ The layers can be reordered except for the Paper layer which always remains at t
 | Pencil        | P              |
 | Pen           | N              |
 | Brush         | B              |
+| Marker        | M              |
 | Eraser        | E              |
 | Hand tool     | Space          |
 | Lasso         | C              |

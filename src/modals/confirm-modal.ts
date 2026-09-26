@@ -9,7 +9,9 @@ export class ConfirmModal extends Modal {
 	constructor(
         app: App, 
         private message: string,
-        private onConfirm: (choice: ConfirmChoice) => void) 
+        private onConfirm: (choice: ConfirmChoice) => void,
+        private yesLabel = "Yes",
+        private noLabel = "No") 
     {
 		super(app);
         this.modalEl.addClass("sketchpad-confirm-modal");
@@ -35,14 +37,14 @@ export class ConfirmModal extends Modal {
 		const buttonContainer = contentEl.createDiv();
 
 		buttonContainer.createEl("button", {
-			text: "Yes",
+			text: this.yesLabel,
 		}).addEventListener("click", () => {
 			this.resolve('yes');
 			this.close();
 		});
 
 		buttonContainer.createEl("button", {
-			text: "No",
+			text: this.noLabel,
 		}).addEventListener("click", () => {
 			this.resolve('no');
 			this.close();

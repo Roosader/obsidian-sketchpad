@@ -6,7 +6,7 @@ const RENDER_SCALE = 2; // render at 2x so the ring stays crisp after downscale
 const TIP_LINE_PX = 0.5; // hairline width of the tip circle + outline (CSS px)
 const TIP_PADDING_PX = 1; // canvas padding beyond the tip circle (CSS px)
 
-const DRAWN_TOOLS: ReadonlySet<ViewTool> = new Set(['pencil', 'pen', 'brush', 'eraser']);
+const DRAWN_TOOLS: ReadonlySet<ViewTool> = new Set(['pencil', 'pen', 'brush', 'eraser', 'marker']);
 
 let cursorBitmap: HTMLCanvasElement | null = null;
 let cursorBitmapPromise: Promise<HTMLCanvasElement> | null = null;
@@ -88,11 +88,38 @@ export class CursorOverlay {
 
 	private lastPointerType = 'mouse';
 	private lastButtons = 0;
+	// Device arbitration: the cursor follows the device in use. While a pen is
+	// that device, a mouse hover that repeats the mouse's last coordinates is
+	// Chromium's synthetic hover re-dispatch after pen interaction (pen up, or
+	// the pen leaving the element) and must not resurrect the cursor there.
+	private activeDevice: 'mouse' | 'pen' | 'touch' = 'mouse';
+	private lastMouseClientX = 0;
+	private lastMouseClientY = 0;
 
 	private cssSize = -1; // current canvas display size (CSS px)
 
 	private predictionOffsetX = 0; // pointer-prediction offset (client px), applied on top of lastClientX/Y
 	private predictionOffsetY = 0;
+
+	// while an image placement gizmo is active the tool cursor is suppressed
+	// so the transform handles are directly clickable
+	private suppressed = false;
+
+	// true while the pointer is over a toolbar control
+	private overToolbar = false;
+
+	setSuppressed(suppressed: boolean): void {
+		this.suppressed = suppressed;
+		this.refresh();
+	}
+
+	setOverToolbar(over: boolean): void {
+		if (over === this.overToolbar) {
+			return;
+		}
+		this.overToolbar = over;
+		this.refresh();
+	}
 
 	private iconBitmap: HTMLCanvasElement | null = null; //cursor for marking tools
 	private circleBitmap: HTMLCanvasElement | null = null; //cursor for non-marking tools on pen input
@@ -147,19 +174,42 @@ export class CursorOverlay {
 		}
 		this.predictionOffsetX = dx;
 		this.predictionOffsetY = dy;
-		if (this.hasPosition && this.isDrawnTool()) {
+		if (this.hasPosition && this.isDrawnTool() && !this.suppressed && !this.overToolbar) {
+			// gate the reposition on the same suppression checks as refresh():
+			// a raw update must never re-park a hidden cursor at the pointer
 			this.place();
 		}
 	}
 
 	// moves the cursor canvas to the latest pointer position 
 	handlePointerMove(clientX: number, clientY: number, pointerType: string, buttons: number): void {
+		// Device arbitration (pen wins) - fix bug where a ghost cursor appears 
+		// after switching from using a mouse to using a stylus
+		if (pointerType === 'mouse') {
+			if (
+				this.activeDevice === 'pen' &&
+				(buttons & 1) === 0 &&
+				clientX === this.lastMouseClientX &&
+				clientY === this.lastMouseClientY
+			) {
+				return;
+			}
+			this.lastMouseClientX = clientX;
+			this.lastMouseClientY = clientY;
+			this.activeDevice = 'mouse';
+		} else if (pointerType === 'pen') {
+			this.activeDevice = 'pen';
+		} else if (pointerType === 'touch') {
+			this.activeDevice = 'touch';
+		}
+
 		this.lastClientX = clientX;
 		this.lastClientY = clientY;
 		this.lastPointerType = pointerType;
 		this.lastButtons = buttons;
 		this.hasPosition = true;
-		if (!this.isDrawnTool()) {
+		if (this.suppressed) { return; }
+		if (this.overToolbar || !this.isDrawnTool()) {
 			this.hide();
 			return;
 		}
@@ -175,18 +225,33 @@ export class CursorOverlay {
 		this.hide();
 	}
 
-	// records the pointer type; visibility is decided by isDrawnTool(), which
-	// shows the cursor while touch-drawing and hides it for pan/zoom/rotate
-	handlePointerDown(pointerType: string): void {
+	// records the pointer type/buttons; visibility is decided by isDrawnTool(),
+	// which shows the cursor while touch-drawing and hides it for pan/zoom/rotate
+	handlePointerDown(pointerType: string, buttons = 0): void {
 		this.lastPointerType = pointerType;
+		this.lastButtons = buttons;
+	}
+
+	// pointer release: the overlay is a hover cursor, so record the button
+	// state from the event and re-evaluate immediately — no pointermove may follow
+	handlePointerUp(buttons = 0): void {
+		this.lastButtons = buttons;
+		this.refresh();
 	}
 
 	destroy(): void {
 	}
 
+	// Re-renders the cursor and re-evaluates every visibility gate. This is the
+	// single authority for showing/hiding: state changes (tool switch, button
+	// release, suppression, toolbar hover) call this instead of relying on the
+	// next pointermove, which may never come.
 	refresh(): void {
 		this.updateTipSize();
-		if (!this.hasPosition || !this.isDrawnTool()) {
+		// updateTipSize early-returns when the display size is unchanged, so
+		// redraw explicitly (e.g. a tool switch at an identical tip size)
+		this.drawCanvas();
+		if (this.suppressed || this.overToolbar || !this.hasPosition || !this.isDrawnTool()) {
 			this.hide();
 			return;
 		}
@@ -244,6 +309,13 @@ export class CursorOverlay {
 		} else {
 			cssSize = CURSOR_PX;
 		}
+		// Force an odd size: the 5x5 cross glyph is odd-sized, so it can only
+		// be BOTH pixel-grid-aligned (crisp) AND exactly centered when the
+		// canvas size is odd. With even sizes the 2x backing grid phase flips
+		// with zoom and the 1px arms render at half intensity (blurry).
+		if (cssSize % 2 === 0) {
+			cssSize += 1;
+		}
 		if (cssSize === this.cssSize) {
 			return;
 		}
@@ -290,10 +362,14 @@ export class CursorOverlay {
 	private drawCenteredBitmap(bitmap: HTMLCanvasElement): void {
 		const w = bitmap.width * RENDER_SCALE;
 		const h = bitmap.height * RENDER_SCALE;
-		let x = (this.canvas.width - w) / 2;
-		let y = (this.canvas.height - h) / 2;
-		x -= x % RENDER_SCALE;
-		y -= y % RENDER_SCALE;
+		// Center exactly in the backing store. canvas.width and w are both
+		// even (cssSize * RENDER_SCALE, bitmap.width * RENDER_SCALE), so
+		// these coordinates are always whole pixels. Do NOT snap them to
+		// even coordinates: snapping shifted the glyph 1 backing px
+		// (0.5 CSS px) whenever the natural center was odd, which read as
+		// the cross not being centered on the pointer.
+		const x = (this.canvas.width - w) / 2;
+		const y = (this.canvas.height - h) / 2;
 		this.ctx.imageSmoothingEnabled = false;
 		this.ctx.drawImage(bitmap, x, y, w, h);
 	}
