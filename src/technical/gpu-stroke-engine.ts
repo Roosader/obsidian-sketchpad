@@ -546,11 +546,16 @@ export class GpuStrokeEngine implements DrawingEngine {
 			copyTexture(this.gl, liveTex, this.baselineTex, this.width, this.height);
 		}
 		this.computeLayerCaches(layer);
+		const docWidth = Math.max(1, this.width);
+		const docHeight = Math.max(1, this.height);
+		const placedFit = Math.min(1, docWidth / width, docHeight / height);
+		const placedWidth = Math.max(1, Math.round(width * placedFit));
+		const placedHeight = Math.max(1, Math.round(height * placedFit));
 		const bounds: SelectionBounds = {
-			left: Math.round((this.width - width) / 2),
-			top: Math.round((this.height - height) / 2),
-			width,
-			height,
+			left: Math.round((docWidth - placedWidth) / 2),
+			top: Math.round((docHeight - placedHeight) / 2),
+			width: placedWidth,
+			height: placedHeight,
 		};
 		this.imagePlacement = { layerName: layer.name, imageTexture: texture, bounds };
 		this.drawImagePlacementPreview(layer, { ...DEFAULT_SELECTION_TRANSFORM });
@@ -649,7 +654,7 @@ export class GpuStrokeEngine implements DrawingEngine {
 		this.gl.uniform2f(this.uniform(this.selectionQuadProgram, 'uTranslate'), translateX, translateY);
 		this.gl.uniform1f(this.uniform(this.selectionQuadProgram, 'uRotation'), transform.rotation);
 		this.gl.uniform2f(this.uniform(this.selectionQuadProgram, 'uScale'), transform.scaleX, transform.scaleY);
-		this.bindTexture(0, this.imagePlacement.imageTexture, translationOnly ? this.nearestSampler : this.mipmapSampler);
+		this.bindTexture(0, this.imagePlacement.imageTexture, this.isPixelExactImagePlacement(transform) ? this.nearestSampler : this.mipmapSampler);
 		this.bindTexture(1, this.scratchA, this.nearestSampler);
 		this.gl.uniform1i(this.uniform(this.selectionQuadProgram, 'uSelectionTex'), 0);
 		this.gl.uniform1i(this.uniform(this.selectionQuadProgram, 'uDstTex'), 1);
@@ -680,6 +685,22 @@ export class GpuStrokeEngine implements DrawingEngine {
 			Math.abs(transform.scaleY - 1) <= EPS
 		);
 	}
+
+	// true when the placement draws the image texture 1:1 onto the canvas
+	// so nearest sampling is exact (pixel art stays crisp)
+	private isPixelExactImagePlacement(transform: SelectionTransform): boolean {
+		const placement = this.imagePlacement;
+		if (!placement || !this.isTranslationOnlySelectionTransform(transform)) {
+			return false;
+		}
+		const destWidth = placement.bounds.width * transform.scaleX;
+		const destHeight = placement.bounds.height * transform.scaleY;
+		return (
+			Math.abs(destWidth - placement.imageTexture.width) < 0.5 &&
+			Math.abs(destHeight - placement.imageTexture.height) < 0.5
+		);
+	}
+
 
 	async snapshotLayerCanvases(): Promise<Map<LayerName, HTMLCanvasElement>> {
 		const result = new Map<LayerName, HTMLCanvasElement>();

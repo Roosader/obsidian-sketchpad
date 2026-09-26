@@ -20,8 +20,7 @@ export interface DrawingControllerDeps {
 	render: () => void;
 	refreshUndoRedoUI: () => void;
 	getToolSettingsSidebar: () => ToolSettingsSidebarElements | undefined;
-	// true while an image placement preview is active on the active layer —
-	// strokes must not start, or they would bake into the image on apply
+	// true while an image placement preview is active, strokes must not start
 	imagePlacementActive?: () => boolean;
 }
 

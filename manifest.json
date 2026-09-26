@@ -1,7 +1,7 @@
 {
 	"id": "sketchpad",
 	"name": "Sketchpad",
-	"version": "1.1.0",
+	"version": "1.1.1",
 	"minAppVersion": "1.5.0",
 	"description": "Create sketches and drawings in an intuitive digital art interface. Work with a pencil, pen, brush, or marker with pressure sensitivity. Each drawing tool has its own layer.",
 	"author": "Mozzaren",
