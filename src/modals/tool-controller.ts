@@ -5,6 +5,7 @@ import type SketchpadPlugin from '../main';
 import type { LayerName, OraLayer, ToolName, ViewTool } from '../utilities/types';
 import type { CanvasViewport } from '../technical/viewport';
 import type { DrawingEngine } from '../technical/drawing-engine';
+import { isFixedLayerName } from '../technical/sketchpad-document';
 
 export interface ToolControllerDeps {
 	plugin: SketchpadPlugin;
@@ -15,9 +16,8 @@ export interface ToolControllerDeps {
 	getToolSettingsSidebar: () => ToolSettingsSidebarElements | undefined;
 
 	commitSelection: () => void;
-
+	commitImagePlacement: () => void;
 	syncLayerSidebar: () => void;
-
 	// when false (no file open), no tool button carries the layer-active highlight
 	hasOpenFile?: () => boolean;
 
@@ -58,21 +58,28 @@ export class ToolController {
 		return this.activeLayer;
 	}
 
-	private isViewTool(tool: ViewTool): boolean {
+	isViewTool(tool: ViewTool): boolean {
 		return tool === 'hand' || tool === 'zoom-in' || tool === 'zoom-out' || tool === 'rotate';
 	}
 
+	isViewToolActive(): boolean {
+		return this.isViewTool(this.currentTool);
+	}
+
 	setTool(tool: ViewTool): void {
-		// leaving the lasso for an actual editing tool/eyedropper applies any active selection
-		// leaving it for a view tool keeps the selection alive
-		if (this.currentTool === 'lasso' && tool !== 'lasso' && !this.isViewTool(tool)) {
-			this.deps.commitSelection();
+		if (!this.isViewTool(tool)) {
+			// Preserve the lasso selection for lasso and view tools.
+			if (tool !== 'lasso') {
+				this.deps.commitSelection();
+				this.deps.commitImagePlacement();
+			}
 		}
+
 		this.currentTool = tool;
-		if (tool === 'pencil' || tool === 'pen' || tool === 'brush' || tool === 'eraser') {
+		if (tool === 'pencil' || tool === 'pen' || tool === 'brush' || tool === 'eraser' || tool === 'marker') {
 			this.lastDrawTool = tool;
 			this.activeLayer = this.getToolLayer(tool);
-			this.lastActiveLayer = tool === 'eraser' ? this.lastActiveLayer : this.activeLayer;
+			this.lastActiveLayer = (tool === 'eraser' || tool === 'marker') ? this.lastActiveLayer : this.activeLayer;
 		}
 
 		this.refreshToolSettingsUI();
@@ -137,7 +144,7 @@ export class ToolController {
 	// maps each drawing tool to whether its target layer is currently visible
 	private getDrawingToolVisibilityMap(): Partial<Record<ToolName, boolean>> {
 		const map: Partial<Record<ToolName, boolean>> = {};
-		for (const tool of ['pencil', 'pen', 'brush', 'eraser'] as ToolName[]) {
+		for (const tool of ['pencil', 'pen', 'brush', 'eraser', 'marker'] as ToolName[]) {
 			const layer = this.deps.getLayers().find((entry) => entry.name === this.getToolLayer(tool));
 			map[tool] = layer ? layer.visible : true;
 		}
@@ -154,17 +161,17 @@ export class ToolController {
 		syncToolbarToLayerVisibility(toolbar, visibilityMap);
 
 		// switch active tool if the current tool's layer is hidden, falling back to hand tool if none are available
-		if (this.currentTool === 'pencil' || this.currentTool === 'pen' || this.currentTool === 'brush' || this.currentTool === 'eraser') {
+		if (this.currentTool === 'pencil' || this.currentTool === 'pen' || this.currentTool === 'brush' || this.currentTool === 'eraser' || this.currentTool === 'marker') {
 			if (!visibilityMap[this.currentTool]) {
-				const fallback = (['pencil', 'pen', 'brush', 'eraser'] as ToolName[]).find((tool) => visibilityMap[tool]);
+				const fallback = (['pencil', 'pen', 'brush', 'eraser', 'marker'] as ToolName[]).find((tool) => visibilityMap[tool]);
 				this.setTool(fallback ?? 'hand');
 			}
 		}
 	}
 
 	updateActiveLayer(tool: ToolName): void {
-		this.activeLayer = tool === 'eraser' ? this.lastActiveLayer : this.getToolLayer(tool);
-		if (tool !== 'eraser') {
+		this.activeLayer = (tool === 'eraser' || tool === 'marker') ? this.lastActiveLayer : this.getToolLayer(tool);
+		if (tool !== 'eraser' && tool !== 'marker') {
 			this.lastActiveLayer = this.activeLayer;
 		}
 	}
@@ -172,6 +179,11 @@ export class ToolController {
 	activateLayer(layerName: LayerName): void {
 		if (layerName === 'Paper') {
 			return;
+		}
+
+		// extra layers have no dedicated tool - hand controls to marker if a layer-assigned drawing tool was previously selected
+		if (!isFixedLayerName(layerName) && (this.currentTool === 'pencil' || this.currentTool === 'pen' || this.currentTool === 'brush')) {
+			this.setTool('marker');
 		}
 
 		if (this.currentTool === 'pencil' || this.currentTool === 'pen' || this.currentTool === 'brush') {
@@ -183,9 +195,8 @@ export class ToolController {
 		}
 
 		if (this.currentTool === 'lasso') {
-			// Bake in (or cancel) any selection on the previous layer, then
-			// keep the lasso tool for the newly activated layer.
 			this.deps.commitSelection();
+			this.deps.commitImagePlacement();
 		}
 
 		this.activeLayer = layerName;
@@ -197,8 +208,27 @@ export class ToolController {
 		this.deps.syncLayerSidebar();
 	}
 
+	// true when the tool is bound to one of the fixed layers
+	private ownsLayerTool(tool: ViewTool): tool is 'pencil' | 'pen' | 'brush' {
+		return tool === 'pencil' || tool === 'pen' || tool === 'brush';
+	}
+
+	// re-targets the active layer after the open document changed
+	syncActiveLayerToDocument(): void {
+		const layers = this.deps.getLayers();
+		const topLayer = [...layers].reverse().find((layer) => layer.name !== 'Paper')?.name;
+		const ownedLayer = this.ownsLayerTool(this.currentTool) ? this.getToolLayer(this.currentTool) : null;
+		const target = ownedLayer && layers.some((layer) => layer.name === ownedLayer) ? ownedLayer : topLayer;
+		if (!target) {
+			return;
+		}
+		// both fields: eraser/marker resolve their target from lastActiveLayer
+		this.activeLayer = target;
+		this.lastActiveLayer = target;
+	}
+
 	getTargetLayer(tool: ToolName): OraLayer {
-		const layerName = tool === 'eraser' ? this.lastActiveLayer : this.activeLayer;
+		const layerName = (tool === 'eraser' || tool === 'marker') ? this.lastActiveLayer : this.activeLayer;
 		const layer = this.deps.getLayers().find((entry) => entry.name === layerName);
 		if (!layer) {
 			throw new Error(`Layer ${layerName} not found`);

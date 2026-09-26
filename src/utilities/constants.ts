@@ -17,6 +17,12 @@ export const DEFAULT_GRID_OPACITY = 40; // percent, 0-100
 export const MAX_GRID_SIZE = 512;
 
 export const DEFAULT_LAYER_ORDER: LayerName[] = ['Paper', 'Sketch', 'Ink', 'Paint'];
+export const MAX_EXTRA_LAYERS = 6;
+
+//accepted import extensions: everything Obsidian can rasterize
+export const IMAGE_IMPORT_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'bmp', 'svg'];
+//preload margin for import image thumbnails in both scroll directions
+export const IMPORT_THUMBNAIL_PRELOAD_MARGIN = '600px 0px';
 
 export const DEFAULT_AUTOSAVE_INTERVAL_MINUTES = 15;
 export const AUTOSAVE_INTERVAL_OPTIONS: number[] = [5, 10, 15, 20, 25, 30];
@@ -37,6 +43,7 @@ export const toolCursorClasses = [
 	'sketchpad-pen-active',
 	'sketchpad-brush-active',
 	'sketchpad-eraser-active',
+	'sketchpad-marker-active',
 	'sketchpad-eyedropper-active',
 	'sketchpad-hand-active',
 	'sketchpad-lasso-active',
@@ -67,6 +74,7 @@ export const DEFAULT_TOOL_HOTKEYS: Partial<Record<ViewTool, string>> = {
 	pen: 'n',
 	brush: 'b',
 	eraser: 'e',
+	marker: 'm',
 	hand: ' ',
 	lasso: 'c',
 	rotate: 'r',

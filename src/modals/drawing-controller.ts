@@ -20,6 +20,9 @@ export interface DrawingControllerDeps {
 	render: () => void;
 	refreshUndoRedoUI: () => void;
 	getToolSettingsSidebar: () => ToolSettingsSidebarElements | undefined;
+	// true while an image placement preview is active on the active layer —
+	// strokes must not start, or they would bake into the image on apply
+	imagePlacementActive?: () => boolean;
 }
 
 export class DrawingController {
@@ -141,6 +144,12 @@ export class DrawingController {
 		if (event.pointerType === 'touch') {
 			return;
 		}
+		// a held pointer (pen barrel or mouse) crossing back onto the canvas
+		// while an image placement is active must not start a stroke — the
+		// pointerdown that began it was routed to the placement controller
+		if (this.deps.imagePlacementActive?.()) {
+			return;
+		}
 		const primaryButtonHeld = (event.buttons & 1) !== 0;
 		if (primaryButtonHeld && !this.deps.viewport.isPanning && !this.deps.engine.isDrawing()) {
 			this.handlePointerDown(event);
@@ -152,9 +161,13 @@ export class DrawingController {
 		if (this.deps.viewport.tryHandleTouchPointerDown(event)) {
 			return;
 		}
-		this.updatePressureReadout(event);
-		// the Wacom stylus eraser end always erases, regardless of the selected tool
 		const tool = isStylusEraser(event) ? 'eraser' : this.deps.tools.getCurrentTool();
+		// block stroke start while image placement is active 
+		// view tools remain available so they can manipulate the canvas non-destructively
+		if (this.deps.imagePlacementActive?.() && !this.deps.tools.isViewTool(tool)) {
+			return;
+		}
+		this.updatePressureReadout(event);
 		if (tool === 'eyedropper') {
 			this.deps.tools.pickColorAtPointer(event);
 			return;

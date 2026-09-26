@@ -54,6 +54,18 @@ export const DEFAULT_TOOL_SETTINGS: ToolSettingsMap = {
 		pressureSizeCurve: clonePressureCurve(DEFAULT_PRESSURE_CURVE),
 		pressureOpacityCurve: clonePressureCurve(DEFAULT_PRESSURE_CURVE),
 	},
+	marker: {
+		size: 12,
+		opacity: 70,
+		color: '#ffd43b',
+		blendMode: 'normal',
+		hardness: 100,
+		minimumSize: false,
+		pressureSize: false,
+		pressureOpacity: false,
+		pressureSizeCurve: clonePressureCurve(DEFAULT_PRESSURE_CURVE),
+		pressureOpacityCurve: clonePressureCurve(DEFAULT_PRESSURE_CURVE),
+	},
 };
 
 // retrieve tool settings from saved data

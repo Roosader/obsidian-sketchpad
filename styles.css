@@ -40,6 +40,13 @@ button.sketchpad-header-button{
 	height: 100%; 
 }
 
+.sketchpad-canvas-region {
+	position: relative;
+	display: flex;
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+}
 .sketchpad-canvas-panel {
 	position: relative;
 	flex: 1;
@@ -134,6 +141,7 @@ button.sketchpad-tool {
 .sketchpad-pencil-active,
 .sketchpad-pen-active,
 .sketchpad-brush-active,
+.sketchpad-marker-active,
 .sketchpad-eraser-active {
 	cursor: none;
 }
@@ -374,22 +382,7 @@ button.sketchpad-panel-move-button:active {
 }
 .sketchpad-layer-row div {
 	min-width: 45px;
-}
-.sketchpad-grid-toggle-row,
-.sketchpad-layer-toggle-row {
-	color: var(--text-muted);
-	display: flex;
-	flex-direction: row;
-	align-items: center;
-	gap: 8px;
-	padding: 5px;
-	justify-content: space-between;
-	border-bottom: 1px solid var(--background-modifier-border);
-}
-.sketchpad-layer-toggle-row span,
-.sketchpad-grid-toggle-row span{
-	display: flex;
-	align-items: center;
+	text-wrap: nowrap;
 }
 .sketchpad-layer-controls button.sketchpad-layer-visibility-button,
 .sketchpad-layer-controls button.sketchpad-layer-move-button {
@@ -453,6 +446,72 @@ input[type='color'].sketchpad-paper-color-picker::-webkit-color-swatch-wrapper {
 }
 input[type='color'].sketchpad-paper-color-picker::-webkit-color-swatch {
     border-radius: 0;
+}
+
+/* Layer panel add/delete actions */
+.sketchpad-layer-actions {
+	display: flex;
+	justify-content: space-between;
+	border-bottom: 1px solid var(--background-modifier-border);
+	padding: 4px 8px;
+	gap: 2px;
+}
+.sketchpad-layer-actions .sketchpad-layer-action-button {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--interactive-normal);
+	padding: 0 !important;
+	width: stretch;
+	height:25px;
+	font-size: 0.7rem;
+	border: none;
+	border-radius: var(--radius-s);
+	cursor: pointer;
+}
+.sketchpad-layer-action-button.mod-warning {
+	color: var(--background-modifier-error);
+}
+.sketchpad-layer-action-button:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+.sketchpad-layer-action-button:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+.sketchpad-layer-action-button.is-active {
+	background: var(--interactive-accent);
+}
+
+/* Delete layer modal */
+.sketchpad-delete-layer-text {
+	color: var(--text-muted);
+	margin-bottom: 12px;
+	text-align: center;
+}
+
+.sketchpad-delete-layer-list {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin: 12px 0;
+	max-height: 300px;
+	overflow-y: auto;
+}
+.sketchpad-delete-layer-row {
+	padding: 6px 10px;
+	border-radius: var(--radius-s);
+	background:color-mix(in srgb, var(--text-normal) 20%, var(--background-secondary));
+	cursor: pointer;
+	text-align: center;
+}
+.sketchpad-delete-layer-row:hover {
+	background: var(--background-secondary-alt);
+}
+.sketchpad-delete-layer-row.is-selected {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
 }
 
 /* layer order controls */
@@ -526,10 +585,8 @@ body.is-mobile .sketchpad-view-controls-button {
 	background-color: var(--interactive-accent);
 }
 
-
 /* Right Sidebar styles */
-.sketchpad-right-sidebar
-{	
+.sketchpad-right-sidebar {	
 	background: var(--background-primary);
 	border-left: 1px solid var(--background-modifier-border);
 	overflow: auto;
@@ -824,14 +881,17 @@ input[type='range'].sketchpad-okhsl-slider:focus::-webkit-slider-thumb {
 	color: var(--text-muted);
 }
 .sketchpad-export-file-button-row,
-.sketchpad-new-file-button-row {
+.sketchpad-new-file-button-row,
+.sketchpad-delete-layer-button-row {
 	display: flex;
 	justify-content: flex-end;
 	gap: 10px;
 }
 .sketchpad-export-file-button-row button,
-.sketchpad-new-file-button-row button {
+.sketchpad-new-file-button-row button,
+.sketchpad-delete-layer-button-row button {
 	min-width: 80px;	
+	cursor: pointer;
 }
 
 /* Open File modal */
@@ -859,6 +919,8 @@ input[type='range'].sketchpad-okhsl-slider:focus::-webkit-slider-thumb {
 	border-radius: var(--radius-s);
 	background-color: var(--background-secondary);
 	padding: 6px;
+	padding-left: 16px;
+	scrollbar-gutter: stable;
 }
 .sketchpad-file-thumbnail-empty {
 	text-align: center;
@@ -887,6 +949,11 @@ input[type='range'].sketchpad-okhsl-slider:focus::-webkit-slider-thumb {
 	border-radius: var(--radius-s);
 	background-color: var(--background-modifier-hover);
 	pointer-events: none;
+	opacity: 0;
+}
+.sketchpad-file-thumbnail-img.is-loaded {
+	opacity: 1;
+	transition: opacity 150ms ease;
 }
 .sketchpad-file-thumbnail-img.is-empty {
 	opacity: 0.4;
@@ -906,6 +973,26 @@ input[type='range'].sketchpad-okhsl-slider:focus::-webkit-slider-thumb {
 	margin-top: 10px;
 	margin-left: auto;
 	min-width: 80px; 
+	cursor: pointer;
+}
+
+/* Import image modal */
+.sketchpad-import-layer-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin: 12px 0;
+}
+.sketchpad-import-layer-row label {
+	text-wrap: nowrap;
+}
+.sketchpad-import-layer-row select {
+	width: stretch;
+	font-weight: 600;
+	text-align: center;
+	font-size: 1em;
+	cursor: pointer;
+	padding: 0 10px;
 }
 
 /* ORA embed previews in notes */
@@ -946,8 +1033,7 @@ input[type='range'].sketchpad-okhsl-slider:focus::-webkit-slider-thumb {
 
 	border-radius: var(--radius-m);
 	border: 1px solid var(--background-modifier-border);
-	margin-top: 10px;
-	margin-left: 10px;
+	margin: 10px;
 }
 .sketchpad-minimal.sketchpad-right-sidebar {
 	position: absolute;
@@ -959,8 +1045,7 @@ input[type='range'].sketchpad-okhsl-slider:focus::-webkit-slider-thumb {
 	background: var(--background-primary);
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
-	margin-top: 10px;
-	margin-right: 10px;
+	margin: 10px;
 }
 .sketchpad-minimal .sketchpad-view-controls,
 .sketchpad-minimal .sketchpad-vertical-toolbar {
@@ -1026,4 +1111,43 @@ body.is-mobile .sketchpad-tool {
 body.is-mobile .sketchpad-tool svg {
 	width: 20px;
 	height: 20px;
+}
+/* increase scrollbar visibility */
+.view-header.sketchpad-header::-webkit-scrollbar-thumb,
+.sketchpad-modal .sketchpad-layer-controls::-webkit-scrollbar-thumb,
+.sketchpad-modal .sketchpad-view-controls::-webkit-scrollbar-thumb,
+.sketchpad-modal .sketchpad-vertical-toolbar::-webkit-scrollbar-thumb,
+.sketchpad-modal .sketchpad-okhsl-color-picker::-webkit-scrollbar-thumb,
+.sketchpad-modal .sketchpad-tool-settings::-webkit-scrollbar-thumb{
+	background-color: color-mix(in srgb, var(--text-normal) 30%, var(--background-primary));
+}
+.view-header.sketchpad-header::-webkit-scrollbar-thumb:hover,
+.sketchpad-modal .sketchpad-layer-controls::-webkit-scrollbar-thumb:hover,
+.sketchpad-modal .sketchpad-view-controls::-webkit-scrollbar-thumb:hover,
+.sketchpad-modal .sketchpad-vertical-toolbar::-webkit-scrollbar-thumb:hover,
+.sketchpad-modal .sketchpad-okhsl-color-picker::-webkit-scrollbar-thumb:hover,
+.sketchpad-modal .sketchpad-tool-settings::-webkit-scrollbar-thumb:hover{
+	background-color: color-mix(in srgb, var(--text-normal) 45%, var(--background-primary));
+}
+
+/* Hack to fix the Windows Ink + Chromium cursor flashing bug */
+.sketchpad-pen-patch-layer {
+	position: fixed;
+	inset: 0;
+	z-index: 60;
+	pointer-events: none;
+	display: none;
+}
+.sketchpad-pen-patch-layer.is-blocking {
+	display: block;
+}
+.sketchpad-pen-patch {
+	position: fixed;
+	display: none;
+	pointer-events: none;
+}
+.sketchpad-pen-patch-layer.is-blocking .sketchpad-pen-patch.is-shown {
+	display: block;
+	pointer-events: auto;
+	cursor: none;
 }

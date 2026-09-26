@@ -43,7 +43,10 @@ export function buildLayerSidebar(
 	onGridToggle?: (enabled: boolean) => void,
 	getReorderEnabled?: () => boolean,
 	onReorderToggle?: (enabled: boolean) => void,
-	onMoveLayer?: (layer: LayerName, direction: -1 | 1) => void): LayerControls {
+	onMoveLayer?: (layer: LayerName, direction: -1 | 1) => void,
+	onAddLayer?: () => void,
+	onDeleteLayer?: () => void,
+	canAddLayer?: () => boolean): LayerControls {
 
 	const layerControlEl = container.querySelector('.sketchpad-layer-controls') ?? container.createDiv({ cls: 'sketchpad-layer-controls' });
 	layerControlEl.empty();
@@ -53,6 +56,46 @@ export function buildLayerSidebar(
 	const layerControls: LayerControls = new Map();
 
 	if (firstOpen) {return layerControls;}; //there are no layers when the plugin is first opened
+
+	const actionsRow = layerControlEl.createDiv({ cls: 'sketchpad-layer-actions' });
+	// add / delete layer actions at the top of the panel
+	if (onAddLayer || onDeleteLayer) {
+		if (onDeleteLayer) {
+			const deleteButton = actionsRow.createEl('button', { cls: 'sketchpad-layer-action-button mod-warning' });
+			setIcon(deleteButton, 'trash');
+			setTooltip(deleteButton, 'Delete layer')
+			deleteButton.addEventListener('click', () => onDeleteLayer());
+		}
+		if (onAddLayer) {
+			const addButton = actionsRow.createEl('button', { cls: 'sketchpad-layer-action-button'});
+			setIcon(addButton, 'plus');
+			setTooltip(addButton, 'Add a layer to the document, up to 6 extra layers');
+			addButton.disabled = canAddLayer ? !canAddLayer() : false;
+			addButton.addEventListener('click', () => onAddLayer());
+		}
+	}
+
+	const reorderButton = actionsRow.createEl('button', {cls: 'sketchpad-layer-action-button sketchpad-reorder-toggle-button'});
+	setIcon(reorderButton,'list-chevrons-down-up');
+	setTooltip(reorderButton, 'Toggle layer reordering buttons');
+	reorderButton.classList.toggle('is-active', getReorderEnabled?.() ?? false);
+	reorderButton.addEventListener('click', () => {
+		const enabled = !reorderButton.classList.contains('is-active');
+		reorderButton.classList.toggle('is-active', enabled);
+		onReorderToggle?.(enabled);
+	});
+
+
+	const gridButton = actionsRow.createEl('button', {cls:'sketchpad-layer-action-button sketchpad-grid-toggle-button'});
+	setIcon(gridButton,'grid');
+	setTooltip(gridButton, 'Toggle grid overlay over the document');
+	gridButton.classList.toggle('is-active', getGridEnabled?.() ?? false);
+	gridButton.addEventListener('click', () => {
+		const enabled = !gridButton.classList.contains('is-active');
+		gridButton.classList.toggle('is-active', enabled);
+		onGridToggle?.(enabled);
+	});
+
 
 	const reorderEnabled = getReorderEnabled?.() ?? false;
 
@@ -155,28 +198,6 @@ export function buildLayerSidebar(
 
 		layerControls.set(layer.name, { card, opacity, blendMode });
 	}
-	
-	const gridRow = layerControlEl.createDiv({ cls: 'sketchpad-grid-toggle-row' });
-	setIcon(gridRow.createSpan(), 'grid');
-	gridRow.createEl('label', { text: 'Show grid' });
-	const gridCheckbox = gridRow.createEl('input');
-	gridCheckbox.setAttribute('type', 'checkbox');
-	gridCheckbox.setAttribute('tabindex', '0');
-	gridCheckbox.checked = getGridEnabled?.() ?? false;
-	gridCheckbox.addEventListener('change', () => {
-		onGridToggle?.(gridCheckbox.checked);
-	});
-
-	const reorderRow = layerControlEl.createDiv({ cls: 'sketchpad-layer-toggle-row' });
-	setIcon(reorderRow.createSpan(), 'list-chevrons-down-up');
-	reorderRow.createEl('label', { text: 'Reorder layers' });
-	const reorderCheckbox = reorderRow.createEl('input');
-	reorderCheckbox.setAttribute('type', 'checkbox');
-	reorderCheckbox.setAttribute('tabindex', '0');
-	reorderCheckbox.checked = getReorderEnabled?.() ?? false;
-	reorderCheckbox.addEventListener('change', () => {
-		onReorderToggle?.(reorderCheckbox.checked);
-	});
 
 	return layerControls;
 }
@@ -302,11 +323,11 @@ function sliderToZoom(sliderValue: number): number {
 
 export function syncViewControls(elements: ViewControlElements, view: ViewTransform, currentTool: ViewTool): void {
 	elements.zoomInput.value = String(Math.round(zoomToSlider(view.zoom)));
-
 	elements.zoomValueEl.setText(`${Math.round(view.zoom * 100)}%`);
 	
 	elements.rotationInput.value = String(view.rotation);
 	elements.rotationValueEl.setText(`${(view.rotation).toFixed(1)}°`);
+	
 	elements.flipHButton.classList.toggle('is-active', view.flipX);
 	elements.flipVButton.classList.toggle('is-active', view.flipY);
 }

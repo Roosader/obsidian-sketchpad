@@ -1,5 +1,5 @@
 import { unzipSync } from 'fflate';
-import { cloneDocument, DEFAULT_DOCUMENT } from '../technical/sketchpad-document';
+import { cloneDocument, DEFAULT_DOCUMENT, uniquifyLayerName } from '../technical/sketchpad-document';
 import type { BlendMode, LayerName, OraDocument, OraLayer } from '../utilities/types';
 
 interface OraLayerMetadata {
@@ -55,13 +55,11 @@ function parseXmlAttribute(xml: string, tagName: string, attributeName: string):
 function parseLayers(xml: string, archive: Record<string, Uint8Array>): OraLayer[] {
 	const layerMatches = Array.from(xml.matchAll(/<layer\b([^>]*)>/g));
 	const layers: OraLayer[] = [];
+	const usedNames = new Set<string>();
 	for (const match of layerMatches) {
 		const metadata = parseLayerMetadata(match[1] ?? '');
-		const name = normalizeLayerName(metadata.name);
-		// skip a duplicate fixed name
-		if (layers.some((entry) => entry.name === name)) {
-			continue;
-		}
+		const name = uniquifyLayerName(normalizeLayerName(metadata.name), usedNames);
+		usedNames.add(name);
 		const rasterBytes = metadata.src ? archive[metadata.src] : undefined;
 		layers.push({
 			name,
@@ -88,7 +86,11 @@ function normalizeLayerName(name: string): LayerName {
 	if (normalized === 'Paint') {
 		return 'Paint';
 	}
-	return 'Paper';
+	if (normalized === 'Paper') {
+		return 'Paper';
+	}
+	// preserve extra/custom layer names instead of collapsing them into Paper
+	return normalized || 'Paper';
 }
 
 function parseLayerMetadata(attributes: string): OraLayerMetadata {

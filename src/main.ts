@@ -6,6 +6,7 @@ import { DEFAULT_TOOL_HOTKEYS, DEFAULT_ROTATE_HOTKEYS, DEFAULT_SIZE_HOTKEYS, DEF
 import type { ToolName, ViewTool, RotateAction, SizeAction, LayerName } from './utilities/types';
 import { SketchpadSettingTab } from './utilities/settings';
 import { sanitizeAutosaveInterval, sanitizeDimension, sanitizeGridOpacity, sanitizeGridSize, sanitizeLayerOrder, sanitizePaperColor, sanitizePanelPos, sanitizePredictionDistance, sanitizePredictionSensitivity } from './utilities/utils';
+import { repairHotkeyBindings, type HotkeyBindings } from './utilities/hotkeys';
 
 interface SketchpadPluginData {
 	toolSettings?: Partial<Record<ToolName, Partial<ToolSettings>>>;
@@ -97,10 +98,19 @@ export default class SketchpadPlugin extends Plugin {
 		this.hideCursorWhileDrawing = data?.hideCursorWhileDrawing ?? false;
 		this.leftSidebarPos = sanitizePanelPos(data?.leftSidebarPos);
 		this.rightSidebarPos = sanitizePanelPos(data?.rightSidebarPos);
-		this.toolHotkeys = { ...DEFAULT_TOOL_HOTKEYS, ...(data?.toolHotkeys ?? {}) };
-		this.rotateHotkeys = { ...DEFAULT_ROTATE_HOTKEYS, ...(data?.rotateHotkeys ?? {}) };
+
+		const hotkeyBindings: HotkeyBindings = {
+			toolHotkeys: { ...DEFAULT_TOOL_HOTKEYS, ...(data?.toolHotkeys ?? {}) },
+			rotateHotkeys: { ...DEFAULT_ROTATE_HOTKEYS, ...(data?.rotateHotkeys ?? {}) },
+			sizeHotkeys: { ...DEFAULT_SIZE_HOTKEYS, ...(data?.sizeHotkeys ?? {}) },
+		};
+		const hotkeysRepaired = repairHotkeyBindings(hotkeyBindings);
+		this.toolHotkeys = hotkeyBindings.toolHotkeys;
+		this.rotateHotkeys = hotkeyBindings.rotateHotkeys;
 		this.rotateSensitivity = data?.rotateSensitivity ?? DEFAULT_ROTATE_SENSITIVITY;
-		this.sizeHotkeys = { ...DEFAULT_SIZE_HOTKEYS, ...(data?.sizeHotkeys ?? {}) };
+		this.sizeHotkeys = hotkeyBindings.sizeHotkeys;
+		if (hotkeysRepaired) { void this.saveToolSettings();}
+		
 		this.defaultFileName = data?.defaultFileName?.trim() || DEFAULT_FILE_NAME;
 		this.defaultImageWidth = sanitizeDimension(data?.defaultImageWidth, DEFAULT_IMAGE_WIDTH);
 		this.defaultImageHeight = sanitizeDimension(data?.defaultImageHeight, DEFAULT_IMAGE_HEIGHT);

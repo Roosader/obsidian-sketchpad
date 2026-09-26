@@ -99,9 +99,9 @@ export function sanitizeLayerOrder(value: unknown, fallback: LayerName[]): Layer
     const result: LayerName[] = [];
     const used = new Set<LayerName>();
     for (const entry of value) {
-        if (typeof entry === 'string' && (FIXED_LAYER_NAMES as string[]).includes(entry) && !used.has(entry as LayerName)) {
-            used.add(entry as LayerName);
-            result.push(entry as LayerName);
+        if (typeof entry === 'string' && (FIXED_LAYER_NAMES as string[]).includes(entry) && !used.has(entry)) {
+            used.add(entry);
+            result.push(entry);
         }
     }
     // Ensure Paper is first and every fixed layer is present.

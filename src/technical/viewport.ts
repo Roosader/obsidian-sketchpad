@@ -44,6 +44,9 @@ export class CanvasViewport {
 		stackCenter: { x: 0, y: 0 },
 	};
 	private rotatePreviousAngle = 0;
+	// pointer that started a mouse/pen-style view-tool drag; needed to release
+	// its capture when a touch gesture supersedes the drag
+	private viewGesturePointerId: number | null = null;
 	// cached screen-space center of the canvas stack (transform-origin), which
 	// only changes when the panel or stack geometry changes, not while drawing
 	private cachedStackCenter: { x: number; y: number } | null = null;
@@ -122,6 +125,36 @@ export class CanvasViewport {
 		}
 	}
 
+	// Drops an in-progress mouse/pen-style view-tool drag WITHOUT changing the
+	// committed view values: whatever pan/zoom/rotation the drag already applied
+	// stays, but the drag no longer exists, so it cannot resume on later pointer
+	// events. Used when a touch gesture supersedes the drag (touch-to-draw
+	// enabled + a view tool active).
+	private cancelViewGesture(): void {
+		if (!this.isPanning && !this.isZooming && !this.isRotating) {
+			return;
+		}
+		const pointerId = this.viewGesturePointerId;
+		// zoom always captures the canvas; pan/rotate capture the gesture source
+		const target = this.isZooming
+			? this.deps.canvas
+			: this.viewGestureSource === 'panel'
+				? this.deps.canvasPanel
+				: this.deps.canvas;
+		this.isPanning = false;
+		this.isZooming = false;
+		this.isRotating = false;
+		this.viewGestureSource = null;
+		this.viewGesturePointerId = null;
+		if (pointerId !== null) {
+			try {
+				target.releasePointerCapture(pointerId);
+			} catch {
+				// capture was already released implicitly
+			}
+		}
+	}
+
 	// wraps a raw angle delta (radians) into (-π, π] so rotation never jumps
 	// a full turn when the pointer crosses the ±π boundary.
 	private wrapAngleDelta(delta: number): number {
@@ -137,6 +170,7 @@ export class CanvasViewport {
 	/* Panning functions */
 	beginPan(event: PointerEvent): void {
 		this.isPanning = true;
+		this.viewGesturePointerId = event.pointerId;
 		this.viewGestureSource = event.target === this.deps.canvas ? 'canvas' : 'panel';
 		this.panStart = { x: event.clientX, y: event.clientY, panX: this.view.panX, panY: this.view.panY };
 		this.capturePointer(event);
@@ -155,6 +189,7 @@ export class CanvasViewport {
 		this.isPanning = false;
 		this.releasePointer(event);
 		this.viewGestureSource = null;
+		this.viewGesturePointerId = null;
 	}
 
 
@@ -172,6 +207,7 @@ export class CanvasViewport {
 
 	beginZoom(event: PointerEvent): void {
 		this.isZooming = true;
+		this.viewGesturePointerId = event.pointerId;
 		const stackCenter = this.getStackCenter();
 		this.zoomStart = {
 			x: event.clientX,
@@ -208,6 +244,7 @@ export class CanvasViewport {
 		}
 
 		this.deps.canvas.releasePointerCapture(event.pointerId);
+		this.viewGesturePointerId = null;
 	}
 
 	private zoomAtPointer(newZoom: number): void {
@@ -258,6 +295,7 @@ export class CanvasViewport {
 	/* Rotation functions */
 	beginRotate(event: PointerEvent): void {
 		this.isRotating = true;
+		this.viewGesturePointerId = event.pointerId;
 		this.viewGestureSource = event.target === this.deps.canvas ? 'canvas' : 'panel';
 
 		const center = this.getPanelCenter();
@@ -284,6 +322,7 @@ export class CanvasViewport {
 		this.isRotating = false;
 		this.releasePointer(event);
 		this.viewGestureSource = null;
+		this.viewGesturePointerId = null;
 	}
 
 	setRotation(rotation: number): void {
@@ -442,9 +481,12 @@ export class CanvasViewport {
 
 		if (this.activeTouchPoints.size >= 2) {
 			// a second finger arrived mid-stroke: switch to a view gesture and
-			// preserve or discard the in-progress one-finger stroke.
+			// preserve or discard the in-progress one-finger stroke. A view-tool
+			// drag started by the first finger must be dropped here, or its stale
+			// pan/zoom/rotate state would override the gesture on later events.
 			if (!this.touchGestureActive) {
 				this.touchGestureActive = true;
+				this.cancelViewGesture();
 				this.deps.onMultiTouchGestureStart?.(!this.touchTapMoved);
 			}
 			this.initializeTouchTransformGesture();
@@ -525,6 +567,9 @@ export class CanvasViewport {
 			return true;
 		}
 
+		// final release: no end*() call will arrive on this path, so make sure a
+		// view-tool drag can never survive the gesture
+		this.cancelViewGesture();
 		// evaluate the tap candidate (2- or 3-finger tap)
 		if (
 			this.touchTapActive &&
