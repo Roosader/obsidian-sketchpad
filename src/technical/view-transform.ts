@@ -24,7 +24,7 @@ export function clampZoom(zoom: number): number {
 }
 
 export function clampRotation(rotation: number): number {
-	return Math.min(MAX_ROTATION, Math.max(MIN_ROTATION, rotation));
+	return Math.min(MAX_ROTATION, Math.max(MIN_ROTATION, Math.round(rotation/15)*15));
 }
 
 // scale factor applied to each axis, preserving flip
